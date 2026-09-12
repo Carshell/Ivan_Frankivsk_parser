@@ -1,0 +1,16 @@
+services:
+  bot:
+    build: .
+    container_name: if-rent-bot
+    restart: unless-stopped
+    init: true       # коректно "пожинає" дочірні процеси Chromium (рекомендація Playwright)
+    ipc: host        # без цього Chromium може вилітати з нестачею пам'яті (рекомендація Playwright)
+    env_file:
+      - .env
+    volumes:
+      # Весь проєкт монтується з хоста — код і стан (сесії, seen.json тощо)
+      # живуть на хості й переживають перестворення контейнера. Образ дає
+      # лише середовище (Python + Playwright + залежності); зміни в .py-файлах
+      # підхоплюються рестартом контейнера, без пересборки. Пересборка потрібна
+      # тільки при зміні requirements.txt.
+      - .:/app

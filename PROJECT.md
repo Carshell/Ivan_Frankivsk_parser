@@ -1,4 +1,4 @@
-
+  
 
 ---Telegram parser
 Telethon (teuegram acaunt)
@@ -25,7 +25,7 @@ https://www.geeksforgeeks.org/python/python-web-scraping-tutorial/
 
 Долар-укр конвертор
 
-Клод агенти
+Клод агенти(з mcp)
 
 тегерам бот (відправка)
 

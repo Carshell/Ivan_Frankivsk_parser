@@ -1,0 +1,6 @@
+playwright==1.62.0
+aiogram>=3.31
+python-dotenv>=1.0
+telethon>=1.36
+instagrapi>=2.18
+pydantic<2.14,>=2.12.5

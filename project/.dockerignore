@@ -1,0 +1,18 @@
+.env
+.git
+.gitignore
+__pycache__/
+**/__pycache__/
+*.pyc
+
+# Сесії/стан — монтуються з хоста через docker-compose.yml (volumes: .:/app),
+# у сам образ їх пекти не треба (і не можна — це секрети конкретного акаунта).
+*.session
+*.session-journal
+telegam/subscribers.json
+telegam/seen.json
+telegam/channels_state.json
+telegam/media_cache/
+instagram/session.json
+instagram/state.json
+currency_cache.json

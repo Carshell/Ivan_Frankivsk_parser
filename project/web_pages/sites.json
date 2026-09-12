@@ -1,0 +1,65 @@
+[
+  {
+    "name": "lun_ua",
+    "enabled": true,
+    "module": "lun.py",
+    "base_url": "https://lun.ua",
+    "search_url": "https://lun.ua/rent/if/houses?price_min=1000&price_max=7000&currency=USD&sort=insert_time",
+    "parser_type": "playwright",
+    "note": "Категорія 'будинки' (houses), сортування за часом додавання (insert_time) — щойно опубліковані зверху."
+  },
+  {
+    "name": "dom_ria",
+    "enabled": true,
+    "module": "dom_ria.py",
+    "base_url": "https://dom.ria.com",
+    "search_url": "https://dom.ria.com/uk/search?excludeSold=1&category=4&realty_type=0&operation=3&state_id=15&in_radius=30&price_cur=1&wo_dupl=1&sort=inspected_sort&firstIteraction=false&city_ids=15&client=searchV2&limit=20&type=list&ch=246_244",
+    "parser_type": "playwright",
+    "note": "Оренда будинків (realty_type=0), Івано-Франківськ + 30 км."
+  },
+  {
+    "name": "olx",
+    "enabled": true,
+    "module": "olx.py",
+    "base_url": "https://www.olx.ua",
+    "search_url": "https://www.olx.ua/uk/nedvizhimost/doma/arenda-domov/ivano-frankovsk/",
+    "parser_type": "playwright",
+    "note": "OLX не публікує координати/точну адресу — lat/lon завжди null для цього джерела."
+  },
+  {
+    "name": "orenda_if_ua",
+    "enabled": false,
+    "module": "orenda_if_ua.py",
+    "base_url": "https://www.orenda.if.ua",
+    "search_url": "https://www.orenda.if.ua/",
+    "parser_type": null,
+    "note": "Не реалізовано. Локальний сайт, структура ще не досліджена."
+  },
+  {
+    "name": "rieltor_ua",
+    "enabled": true,
+    "module": "rieltor_ua.py",
+    "base_url": "https://rieltor.ua",
+    "search_url": "https://rieltor.ua/ivano-frankovsk/flats-rent/?currency=2&price_min=700&price_max=7000&radius=50&sort=-default&autonomy_power=1",
+    "parser_type": "playwright",
+    "note": "Категорія 'квартири' (flats-rent) з демо-URL. lun.ua частково агрегує ці ж оголошення під /realty/{id} — можна порівняти для дедуплікації."
+  },
+  {
+    "name": "flatfy",
+    "enabled": true,
+    "module": "flatfy.py",
+    "base_url": "https://flatfy.ua",
+    "search_url": "https://flatfy.ua/uk/search?currency=USD&geo_id=10008717&has_eoselia=false&is_without_fee=false&price_max=7000&price_min=700&price_sqm_currency=USD&section_id=4&sort=relevance",
+    "parser_type": "playwright",
+    "note": "flatfy.ua — той самий агрегатор, що й lun.ua (спільні дані/CDN) — значний перетин оголошень з lun_ua, поки немає крос-джерельного дедупу за адресою/фото."
+  },
+  {
+    "name": "m2bomber",
+    "enabled": true,
+    "module": "m2bomber.py",
+    "base_url": "https://ua.m2bomber.com",
+    "search_url": "https://ua.m2bomber.com/search?address=%D0%86%D0%B2%D0%B0%D0%BD%D0%BE-%D0%A4%D1%80%D0%B0%D0%BD%D0%BA%D1%96%D0%B2%D1%81%D1%8C%D0%BA%D0%B8%D0%B9+%D1%80%D0%B0%D0%B9%D0%BE%D0%BD%2C+%D0%86%D0%B2%D0%B0%D0%BD%D0%BE-%D0%A4%D1%80%D0%B0%D0%BD%D0%BA%D1%96%D0%B2%D1%81%D1%8C%D0%BA%D0%B8%D0%B9&type=house-rent&osmId=2362670&bn=&rooms=&area=&price=%D0%B2%D1%96%D0%B4+%E2%82%B450000&pricePerM2=false&year=&text=&photo=false&owner=false",
+    "parser_type": "playwright",
+    "note": "Ще один агрегатор (dom.ria/olx тощо всередині) — знову перетин з іншими джерелами, поки без крос-джерельного дедупу."
+  }
+]

@@ -1,6 +1,8 @@
 playwright==1.62.0
 aiogram>=3.31
 python-dotenv>=1.0
-telethon>=1.36
+telethon==1.45.0
 instagrapi>=2.18
+pyotp>=2.9
+anthropic>=0.40
 pydantic<2.14,>=2.12.5

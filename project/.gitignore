@@ -4,6 +4,7 @@ web_pages/lun_output.json
 .env
 telegam/subscribers.json
 telegam/seen.json
+telegam/matched_listings.json
 telegam/channels_session.session
 telegam/channels_session.session-journal
 telegam/channels_state.json
@@ -18,3 +19,5 @@ web_pages/rieltor_ua_output.json
 web_pages/flatfy_output.json
 web_pages/m2bomber_output.json
 currency_cache.json
+security_objects.json
+logs/

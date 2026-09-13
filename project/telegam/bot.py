@@ -63,6 +63,30 @@ def format_listing_message(listing: dict[str, Any]) -> str:
     source_note = f" (джерело: {listing['origin_site']})" if listing.get("origin_site") else ""
     lines.append(f"🔗 {listing['url']}{source_note}")
 
+    claude = listing.get("claude")
+    if claude:
+        score = claude.get("score")
+        if score is not None:
+            lines.append(f"\n⭐ Скоринг: {score}/100")
+        pros = claude.get("pros") or []
+        if pros:
+            lines.append("✅ " + ", ".join(pros))
+        cons = claude.get("cons") or []
+        if cons:
+            lines.append("❌ " + ", ".join(cons))
+        security = claude.get("security_review") or {}
+        risk = security.get("risk_level")
+        if risk:
+            lines.append(f"\n🛡 Безпека: {risk.upper()} ризик")
+        reasoning = security.get("reasoning")
+        if reasoning:
+            lines.append(reasoning)
+        summary = claude.get("summary")
+        if summary:
+            lines.append(f"💬 {summary}")
+    else:
+        lines.append("\n⚠️ Оцінка Claude недоступна (перевір ANTHROPIC_API_KEY)")
+
     return "\n".join(lines)
 
 
@@ -74,9 +98,10 @@ async def send_listing(bot: Bot, chat_id: int, listing: dict[str, Any]) -> None:
     """Надсилає оголошення. Фото можуть бути або URL (lun.ua тощо), або локальним
     файлом (Telegram-канали качають фото собі на диск, бо в них немає публічного URL).
 
-    Один listing може йти кільком підписникам — сам не прибирає локальні файли
-    після відправки (одне й те саме фото знадобиться наступному отримувачу).
-    Виклич cleanup_local_photos(listing) окремо, коли розсилка завершена.
+    Локальні файли фото НЕ видаляються тут — вони лишаються на диску, щоб те
+    саме оголошення можна було показати іншому підписнику пізніше (наприклад,
+    новому користувачу на /start). Видалення — відповідальність
+    telegam/storage.py, коли оголошення випадає зі сховища за лімітом.
     """
     caption = format_listing_message(listing)
     photos = (listing.get("photos") or [])[:MAX_PHOTOS_PER_ALBUM]
@@ -99,14 +124,6 @@ async def send_listing(bot: Bot, chat_id: int, listing: dict[str, Any]) -> None:
         )
 
 
-def cleanup_local_photos(listing: dict[str, Any]) -> None:
-    """Видаляє локально завантажені фото (Telegram-джерело) після того, як listing
-    розіслано всім потрібним отримувачам. Для URL-фото (lun.ua тощо) нічого не робить."""
-    for photo in listing.get("photos") or []:
-        if not _is_remote_url(photo):
-            Path(photo).unlink(missing_ok=True)
-
-
 @router.message(Command("start"))
 async def cmd_start(message: Message) -> None:
     storage.add_subscriber(message.chat.id)
@@ -116,10 +133,23 @@ async def cmd_start(message: Message) -> None:
         "/pause — призупинити розсилку\n"
         "/resume — відновити розсилку\n"
         "/filters — активні джерела та фільтри\n\n"
-        "Наразі підключено джерело lun.ua. Скоринг і блок безпеки за профілем "
-        "замовника (модуль Claude) буде додано окремим кроком — поки що оголошення "
-        "надсилаються без оцінки."
+        "Кожне оголошення проходить хард-фільтри (регіон/тип/ціна) і скоринг "
+        "Claude за твоїм профілем — зі скорингом та блоком безпеки."
     )
+
+    # Показуємо вже знайдені раніше оголошення одразу — без нового парсингу чи
+    # повторного виклику Claude, просто те, що вже накопичено в matched_listings.json.
+    matched = storage.get_matched()
+    if not matched:
+        await message.answer(
+            "Поки що немає раніше знайдених оголошень — перший цикл парсингу "
+            "запуститься найближчим часом (кожні 30 хв), або перевір просто зараз: /digest"
+        )
+        return
+
+    await message.answer(f"Ось {len(matched)} вже знайдених оголошень, що відповідають фільтрам:")
+    for listing in matched:
+        await send_listing(message.bot, message.chat.id, listing)
 
 
 @router.message(Command("pause"))
@@ -148,17 +178,22 @@ async def cmd_filters(message: Message) -> None:
 
 @router.message(Command("digest"))
 async def cmd_digest(message: Message) -> None:
-    from main import run_all_parsers  # локальний імпорт — уникаємо циклічної залежності з main.py
+    # локальний імпорт — уникаємо циклічної залежності з main.py
+    from main import run_all_parsers, score_new_listings
 
     await message.answer("Збираю поточні оголошення, це може зайняти хвилину...")
-    listings = await run_all_parsers()
-    if not listings:
-        await message.answer("Підходящих оголошень зараз не знайдено.")
+    listings, _source_stats = await run_all_parsers()
+    to_send, _score_stats = await score_new_listings(listings)
+
+    storage.mark_seen_bulk([item["external_id"] for item in listings])
+
+    if not to_send:
+        await message.answer("Підходящих оголошень зараз не знайдено (після хард-фільтрів і скорингу).")
         return
 
-    for listing in listings:
-        await send_listing(message.bot, message.chat.id, listing)
-        cleanup_local_photos(listing)
-        storage.mark_seen(listing["external_id"])
+    storage.add_matched(to_send)
 
-    await message.answer(f"Готово: {len(listings)} оголошень.")
+    for listing in to_send:
+        await send_listing(message.bot, message.chat.id, listing)
+
+    await message.answer(f"Готово: {len(to_send)} оголошень.")

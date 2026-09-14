@@ -175,15 +175,29 @@ async def cmd_start(message: Message) -> None:
     # Показуємо вже знайдені раніше оголошення одразу — без нового парсингу чи
     # повторного виклику Claude, просто те, що вже накопичено в matched_listings.json.
     matched = storage.get_matched()
-    if not matched:
-        await message.answer(
-            "Поки що немає раніше знайдених оголошень — перший цикл парсингу "
-            "запуститься найближчим часом (кожні 30 хв), або перевір просто зараз: /digest"
-        )
+    if matched:
+        await message.answer(f"Ось {len(matched)} вже знайдених оголошень, що відповідають фільтрам:")
+        for listing in matched:
+            await send_listing(message.bot, message.chat.id, listing)
         return
 
-    await message.answer(f"Ось {len(matched)} вже знайдених оголошень, що відповідають фільтрам:")
-    for listing in matched:
+    # Бази ще немає (перший запуск, або щойно очистили reset_matched_db.py) —
+    # не чекаємо плановий цикл (до 30 хв), а одразу запускаємо парсинг.
+    await message.answer("Оголошень ще немає в базі — запускаю перший парсинг зараз, це може зайняти кілька хвилин...")
+    from main import run_all_parsers, score_new_listings
+
+    listings, _source_stats = await run_all_parsers()
+    to_send, _score_stats = await score_new_listings(listings)
+    storage.mark_seen_bulk([item["external_id"] for item in listings])
+    if to_send:
+        storage.add_matched(to_send)
+
+    if not to_send:
+        await message.answer("Поки що нічого не знайдено. Спробуй пізніше або команду /digest.")
+        return
+
+    await message.answer(f"Знайдено {len(to_send)} оголошень:")
+    for listing in to_send:
         await send_listing(message.bot, message.chat.id, listing)
 
 

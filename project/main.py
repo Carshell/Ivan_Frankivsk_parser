@@ -41,6 +41,12 @@ SITES_CONFIG = BASE_DIR / "web_pages" / "sites.json"
 PARSE_INTERVAL_SECONDS = 30 * 60  # класифайди — раз на 30 хв (ТЗ, п.7)
 SCORE_THRESHOLD = 50  # нижче — в архів, у Telegram не йде (ТЗ, п.7)
 
+# Тимчасово (за проханням користувача): усе нове йде в бот без відсіву —
+# Claude лише додає короткий аналіз/скоринг/безпеку до повідомлення, але
+# нічого не відкидає. Поставити назад True, щоб повернути п.3/п.7 ТЗ.
+ENABLE_HARD_FILTERS = False
+ENABLE_SCORE_THRESHOLD = False
+
 
 def _load_sites() -> list[dict]:
     return json.loads(SITES_CONFIG.read_text(encoding="utf-8"))
@@ -113,7 +119,7 @@ async def score_new_listings(listings: list[dict]) -> tuple[list[dict], dict]:
     below_threshold = 0
 
     for listing in listings:
-        if not hard_filters.passes_hard_filters(listing):
+        if ENABLE_HARD_FILTERS and not hard_filters.passes_hard_filters(listing):
             continue
         hard_passed += 1
 
@@ -123,7 +129,7 @@ async def score_new_listings(listings: list[dict]) -> tuple[list[dict], dict]:
 
         if claude_result is None:
             claude_unavailable += 1
-        else:
+        elif ENABLE_SCORE_THRESHOLD:
             score = claude_result.get("score")
             if isinstance(score, (int, float)) and score < SCORE_THRESHOLD:
                 below_threshold += 1

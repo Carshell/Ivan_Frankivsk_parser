@@ -17,6 +17,7 @@ from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.filters import Command
 from aiogram.types import FSInputFile, InputMediaPhoto, Message
 
+import dedup
 from telegam import storage
 
 logger = logging.getLogger(__name__)
@@ -217,7 +218,8 @@ async def cmd_start(message: Message) -> None:
     from main import run_all_parsers, score_new_listings
 
     listings, _source_stats = await run_all_parsers()
-    to_send, _score_stats = await score_new_listings(listings)
+    unique_listings, _duplicate_count = dedup.filter_duplicates(listings)
+    to_send, _score_stats = await score_new_listings(unique_listings)
     storage.mark_seen_bulk([item["external_id"] for item in listings])
     if to_send:
         storage.add_matched(to_send)
@@ -263,7 +265,8 @@ async def cmd_digest(message: Message) -> None:
 
     await message.answer("Збираю поточні оголошення, це може зайняти хвилину...")
     listings, _source_stats = await run_all_parsers()
-    fresh, _score_stats = await score_new_listings(listings)
+    unique_listings, _duplicate_count = dedup.filter_duplicates(listings)
+    fresh, _score_stats = await score_new_listings(unique_listings)
 
     storage.mark_seen_bulk([item["external_id"] for item in listings])
 

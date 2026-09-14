@@ -59,6 +59,10 @@ def new_by_source(counts: dict[str, int], total_new: int) -> None:
     _logger.info("%-14s | всього=%d (%s)", "нові", total_new, parts)
 
 
+def duplicates_result(duplicates: int, total: int) -> None:
+    _logger.info("%-14s | %d із %d відсіяно як дублікат іншого джерела", "дедуп", duplicates, total)
+
+
 def hard_filter_result(passed: int, total: int) -> None:
     _logger.info("%-14s | %d із %d пройшли", "хард-фільтр", passed, total)
 

@@ -5,6 +5,7 @@ web_pages/lun_output.json
 telegam/subscribers.json
 telegam/seen.json
 telegam/matched_listings.json
+telegam/dedup_signatures.json
 telegam/bootstrap_done.flag
 telegam/channels_session.session
 telegam/channels_session.session-journal

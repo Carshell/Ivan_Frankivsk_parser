@@ -26,6 +26,7 @@ from aiogram import Bot, Dispatcher
 from dotenv import load_dotenv
 
 import claude_scoring
+import dedup
 import hard_filters
 import pipeline_log
 import security_reference
@@ -161,7 +162,12 @@ async def _notify_admin(bot: Bot, chat_id: int, text: str) -> None:
 
 
 def _build_admin_report(
-    source_stats: list[dict], new_counts: dict[str, int], total_new: int, score_stats: dict, sent: int
+    source_stats: list[dict],
+    new_counts: dict[str, int],
+    total_new: int,
+    duplicate_count: int,
+    score_stats: dict,
+    sent: int,
 ) -> str:
     errors = [s for s in source_stats if s["error"]]
     lines = ["🔴 Були помилки в циклі!" if errors else "📊 Цикл парсингу завершено"]
@@ -175,6 +181,8 @@ def _build_admin_report(
     if total_new:
         parts = ", ".join(f"{src}={n}" for src, n in new_counts.items())
         lines.append(f"\n🆕 Нових: {total_new} ({parts})")
+        if duplicate_count:
+            lines.append(f"🔁 Дублікатів (те саме джерело/об'єкт іншим сайтом): {duplicate_count}")
     else:
         lines.append("\n🆕 Нових оголошень немає")
 
@@ -206,15 +214,22 @@ async def parser_loop(bot: Bot) -> None:
                 )
 
             listings, source_stats = await run_all_parsers()
-            new_listings = [item for item in listings if not storage.is_seen(item["external_id"])]
+            new_listings_all = [item for item in listings if not storage.is_seen(item["external_id"])]
 
             new_counts: dict[str, int] = {}
-            for item in new_listings:
+            for item in new_listings_all:
                 new_counts[item["source"]] = new_counts.get(item["source"], 0) + 1
-            pipeline_log.new_by_source(new_counts, len(new_listings))
+            pipeline_log.new_by_source(new_counts, len(new_listings_all))
+
+            # Дедуплікація (п.7/п.8 ТЗ) — той самий будинок, викладений кількома
+            # джерелами чи репостом, не повинен йти окремим повідомленням кожен
+            # раз. Відсіяні дублікати все одно позначаються "вже баченими" нижче
+            # (за new_listings_all), щоб не перевірялись на дедуп щоцикл заново.
+            new_listings, duplicate_count = dedup.filter_duplicates(new_listings_all)
+            pipeline_log.duplicates_result(duplicate_count, len(new_listings_all))
 
             if new_listings:
-                logger.info("Нових оголошень цього циклу: %d", len(new_listings))
+                logger.info("Нових оголошень цього циклу (після дедуплікації): %d", len(new_listings))
 
             to_send, score_stats = await score_new_listings(new_listings)
             if to_send:
@@ -236,14 +251,16 @@ async def parser_loop(bot: Bot) -> None:
                         await send_listing(bot, chat_id, listing)
                         await asyncio.sleep(1.2)  # уникнути flood control Telegram при пачці оголошень
 
-            storage.mark_seen_bulk([item["external_id"] for item in new_listings])
+            storage.mark_seen_bulk([item["external_id"] for item in new_listings_all])
             if is_bootstrap_cycle:
                 storage.mark_bootstrapped()
             pipeline_log.cycle_result(sent=0 if is_bootstrap_cycle else len(to_send))
 
             if admin_chat_id:
                 sent_count = 0 if is_bootstrap_cycle else len(to_send)
-                report = _build_admin_report(source_stats, new_counts, len(new_listings), score_stats, sent_count)
+                report = _build_admin_report(
+                    source_stats, new_counts, len(new_listings_all), duplicate_count, score_stats, sent_count
+                )
                 if is_bootstrap_cycle:
                     report = (
                         f"🚀 Перший запуск — сформована базова лінія ({len(to_send)} оголошень "

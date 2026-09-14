@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from aiogram import Bot, Router
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command
 from aiogram.types import FSInputFile, InputMediaPhoto, Message
 
@@ -25,6 +26,12 @@ SITES_CONFIG = Path(__file__).parent.parent / "web_pages" / "sites.json"
 MAX_PHOTOS_PER_ALBUM = 5
 DIGEST_LIMIT = 10  # /digest показує топ-N за скорингом, а не все підряд
 DIGEST_WINDOW_HOURS = 48  # "найкращі за останні два дні" — а не тільки цей прогін
+TELEGRAM_MEDIA_CAPTION_LIMIT = 1024  # ліміт Telegram для підпису фото/альбому
+TELEGRAM_MESSAGE_LIMIT = 4096  # ліміт Telegram для звичайного текстового повідомлення
+
+
+def _truncate(text: str, limit: int) -> str:
+    return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
 
 
 def _score_key(listing: dict[str, Any]) -> float:
@@ -109,21 +116,42 @@ async def send_listing(bot: Bot, chat_id: int, listing: dict[str, Any]) -> None:
     саме оголошення можна було показати іншому підписнику пізніше (наприклад,
     новому користувачу на /start). Видалення — відповідальність
     telegam/storage.py, коли оголошення випадає зі сховища за лімітом.
+
+    Дві особливості Telegram, які інакше тихо "з'їдають" оголошення цілком:
+      - підпис фото/альбому обмежений 1024 символами (звичайний текст — 4096) —
+        довгий опис/скоринг Claude обрізаємо для підпису, а повний текст шлемо
+        окремим повідомленням одразу після фото;
+      - якщо Telegram сам не зміг завантажити фото за URL (WEBPAGE_CURL_FAILED —
+        трапляється зі старими записами, збереженими ще до фіксу локального
+        завантаження фото), оголошення все одно йде підписнику, просто без фото.
     """
     caption = format_listing_message(listing)
     photos = (listing.get("photos") or [])[:MAX_PHOTOS_PER_ALBUM]
+
     try:
         if photos:
             media = [
                 InputMediaPhoto(
                     media=photo if _is_remote_url(photo) else FSInputFile(photo),
-                    caption=caption if i == 0 else None,
+                    caption=_truncate(caption, TELEGRAM_MEDIA_CAPTION_LIMIT) if i == 0 else None,
                 )
                 for i, photo in enumerate(photos)
             ]
-            await bot.send_media_group(chat_id, media=media)
+            try:
+                await bot.send_media_group(chat_id, media=media)
+            except TelegramBadRequest as exc:
+                if "WEBPAGE_CURL_FAILED" not in str(exc):
+                    raise
+                logger.warning(
+                    "Оголошення %s: Telegram не зміг завантажити фото за URL — надсилаю без фото",
+                    listing.get("external_id"),
+                )
+                await bot.send_message(chat_id, _truncate(caption, TELEGRAM_MESSAGE_LIMIT))
+                return
+            if len(caption) > TELEGRAM_MEDIA_CAPTION_LIMIT:
+                await bot.send_message(chat_id, _truncate(caption, TELEGRAM_MESSAGE_LIMIT))
         else:
-            await bot.send_message(chat_id, caption)
+            await bot.send_message(chat_id, _truncate(caption, TELEGRAM_MESSAGE_LIMIT))
     except Exception:
         logger.exception(
             "Не вдалося надіслати оголошення %s в чат %s",

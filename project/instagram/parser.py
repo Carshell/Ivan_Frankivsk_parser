@@ -16,6 +16,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from instagrapi import Client
+from instagrapi.exceptions import LoginRequired
 from instagrapi.types import Media, Story
 
 logger = logging.getLogger(__name__)
@@ -54,7 +55,19 @@ def _load_accounts() -> list[str]:
     return [a["username"] for a in accounts if a.get("enabled")]
 
 
-def _get_client() -> Client | None:
+# Кешуємо клієнта на весь час роботи процесу — instagrapi логінитись НЕ треба
+# щоцикл, якщо сесія й так жива. Логін (а тим паче парольний релогін) щоразу
+# з одного пристрою — саме той патерн, який Instagram підозрює в автоматизації
+# ("Підозра на автоматизовані дії", scraping_warning). Клієнт скидається в None
+# лише коли реально ловимо LoginRequired під час роботи (див. parse()).
+_client: Client | None = None
+
+# Випадкова пауза (сек) перед кожним приватним запитом instagrapi — робить
+# трафік менш схожим на бота, ніж рівномірний запит-у-запит без затримок.
+DELAY_RANGE = [1, 3]
+
+
+def _build_client() -> Client | None:
     if not USERNAME or not PASSWORD:
         logger.warning("INSTAGRAM_USERNAME / INSTAGRAM_PASSWORD не задані в .env — пропускаю instagram-парсер")
         return None
@@ -66,6 +79,7 @@ def _get_client() -> Client | None:
         return None
 
     client = Client()
+    client.delay_range = DELAY_RANGE
     client.load_settings(SESSION_FILE)
     try:
         client.login(USERNAME, PASSWORD)  # з валідною сесією instagrapi не робить повторний повний логін
@@ -94,6 +108,20 @@ def _get_client() -> Client | None:
         logger.info("Instagram: сесію відновлено через INSTAGRAM_SESSIONID")
 
     return client
+
+
+def _get_client() -> Client | None:
+    global _client
+    if _client is not None:
+        return _client
+    _client = _build_client()
+    return _client
+
+
+def _invalidate_client() -> None:
+    """Скидає кешованого клієнта — наступний parse() спробує залогінитись заново."""
+    global _client
+    _client = None
 
 
 def _download_media_item(client: Client, item: Any, filename: str) -> str | None:
@@ -221,6 +249,10 @@ async def parse(accounts: list[str] | None = None) -> list[dict[str, Any]]:
                 listings.append(_normalize_story(client, story, username))
 
             logger.info("%s: перевірено %d постів, %d сторіз", username, len(medias), len(stories))
+        except LoginRequired:
+            logger.warning("Instagram: сесія протухла посеред роботи (%s) — скидаю кеш клієнта до наступного циклу", username)
+            _invalidate_client()
+            break
         except Exception:
             logger.exception("Не вдалося обробити акаунт %s", username)
 

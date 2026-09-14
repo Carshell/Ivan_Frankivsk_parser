@@ -6,13 +6,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import Any
+from typing import Any, Awaitable, Callable, TypeVar
 
 from aiogram import Bot, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.filters import Command
 from aiogram.types import FSInputFile, InputMediaPhoto, Message
 
@@ -28,10 +29,28 @@ DIGEST_LIMIT = 10  # /digest показує топ-N за скорингом, а
 DIGEST_WINDOW_HOURS = 48  # "найкращі за останні два дні" — а не тільки цей прогін
 TELEGRAM_MEDIA_CAPTION_LIMIT = 1024  # ліміт Telegram для підпису фото/альбому
 TELEGRAM_MESSAGE_LIMIT = 4096  # ліміт Telegram для звичайного текстового повідомлення
+SEND_DELAY_SECONDS = 1.2  # пауза між оголошеннями в одному чаті — щоб не ловити flood control
+
+_T = TypeVar("_T")
 
 
 def _truncate(text: str, limit: int) -> str:
     return text if len(text) <= limit else text[: limit - 1].rstrip() + "…"
+
+
+async def _call_with_flood_retry(call: Callable[[], Awaitable[_T]], max_retries: int = 3) -> _T:
+    """Викликає бот-метод і при TelegramRetryAfter (flood control) чекає стільки,
+    скільки просить Telegram, і пробує ще раз — інакше оголошення просто губиться."""
+    for attempt in range(max_retries):
+        try:
+            return await call()
+        except TelegramRetryAfter as exc:
+            logger.warning(
+                "Telegram flood control — чекаю %d сек і пробую ще раз (спроба %d/%d)",
+                exc.retry_after, attempt + 1, max_retries,
+            )
+            await asyncio.sleep(exc.retry_after + 1)
+    return await call()
 
 
 def _score_key(listing: dict[str, Any]) -> float:
@@ -117,13 +136,17 @@ async def send_listing(bot: Bot, chat_id: int, listing: dict[str, Any]) -> None:
     новому користувачу на /start). Видалення — відповідальність
     telegam/storage.py, коли оголошення випадає зі сховища за лімітом.
 
-    Дві особливості Telegram, які інакше тихо "з'їдають" оголошення цілком:
+    Три особливості Telegram, які інакше тихо "з'їдають" оголошення цілком:
       - підпис фото/альбому обмежений 1024 символами (звичайний текст — 4096) —
         довгий опис/скоринг Claude обрізаємо для підпису, а повний текст шлемо
         окремим повідомленням одразу після фото;
       - якщо Telegram сам не зміг завантажити фото за URL (WEBPAGE_CURL_FAILED —
         трапляється зі старими записами, збереженими ще до фіксу локального
-        завантаження фото), оголошення все одно йде підписнику, просто без фото.
+        завантаження фото), оголошення все одно йде підписнику, просто без фото;
+      - flood control (TelegramRetryAfter) — коли підряд шлеться багато
+        оголошень (наприклад, з вимкненими фільтрами), Telegram тимчасово
+        відмовляє і просить почекати N секунд; чекаємо і пробуємо ще раз
+        замість того, щоб просто загубити оголошення.
     """
     caption = format_listing_message(listing)
     photos = (listing.get("photos") or [])[:MAX_PHOTOS_PER_ALBUM]
@@ -138,7 +161,7 @@ async def send_listing(bot: Bot, chat_id: int, listing: dict[str, Any]) -> None:
                 for i, photo in enumerate(photos)
             ]
             try:
-                await bot.send_media_group(chat_id, media=media)
+                await _call_with_flood_retry(lambda: bot.send_media_group(chat_id, media=media))
             except TelegramBadRequest as exc:
                 if "WEBPAGE_CURL_FAILED" not in str(exc):
                     raise
@@ -146,12 +169,18 @@ async def send_listing(bot: Bot, chat_id: int, listing: dict[str, Any]) -> None:
                     "Оголошення %s: Telegram не зміг завантажити фото за URL — надсилаю без фото",
                     listing.get("external_id"),
                 )
-                await bot.send_message(chat_id, _truncate(caption, TELEGRAM_MESSAGE_LIMIT))
+                await _call_with_flood_retry(
+                    lambda: bot.send_message(chat_id, _truncate(caption, TELEGRAM_MESSAGE_LIMIT))
+                )
                 return
             if len(caption) > TELEGRAM_MEDIA_CAPTION_LIMIT:
-                await bot.send_message(chat_id, _truncate(caption, TELEGRAM_MESSAGE_LIMIT))
+                await _call_with_flood_retry(
+                    lambda: bot.send_message(chat_id, _truncate(caption, TELEGRAM_MESSAGE_LIMIT))
+                )
         else:
-            await bot.send_message(chat_id, _truncate(caption, TELEGRAM_MESSAGE_LIMIT))
+            await _call_with_flood_retry(
+                lambda: bot.send_message(chat_id, _truncate(caption, TELEGRAM_MESSAGE_LIMIT))
+            )
     except Exception:
         logger.exception(
             "Не вдалося надіслати оголошення %s в чат %s",
@@ -179,6 +208,7 @@ async def cmd_start(message: Message) -> None:
         await message.answer(f"Ось {len(matched)} вже знайдених оголошень, що відповідають фільтрам:")
         for listing in matched:
             await send_listing(message.bot, message.chat.id, listing)
+            await asyncio.sleep(SEND_DELAY_SECONDS)
         return
 
     # Бази ще немає (перший запуск, або щойно очистили reset_matched_db.py) —
@@ -199,6 +229,7 @@ async def cmd_start(message: Message) -> None:
     await message.answer(f"Знайдено {len(to_send)} оголошень:")
     for listing in to_send:
         await send_listing(message.bot, message.chat.id, listing)
+        await asyncio.sleep(SEND_DELAY_SECONDS)
 
 
 @router.message(Command("pause"))
@@ -255,3 +286,4 @@ async def cmd_digest(message: Message) -> None:
     await message.answer(f"Топ {len(ranked)} оголошень за останні два дні (за скорингом):")
     for listing in ranked:
         await send_listing(message.bot, message.chat.id, listing)
+        await asyncio.sleep(SEND_DELAY_SECONDS)

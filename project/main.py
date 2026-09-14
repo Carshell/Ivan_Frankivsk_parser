@@ -234,6 +234,7 @@ async def parser_loop(bot: Bot) -> None:
                 for listing in to_send:
                     for chat_id in storage.active_subscriber_ids():
                         await send_listing(bot, chat_id, listing)
+                        await asyncio.sleep(1.2)  # уникнути flood control Telegram при пачці оголошень
 
             storage.mark_seen_bulk([item["external_id"] for item in new_listings])
             if is_bootstrap_cycle:

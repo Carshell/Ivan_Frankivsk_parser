@@ -23,6 +23,13 @@ router = Router()
 
 SITES_CONFIG = Path(__file__).parent.parent / "web_pages" / "sites.json"
 MAX_PHOTOS_PER_ALBUM = 5
+DIGEST_LIMIT = 10  # /digest показує топ-N за скорингом, а не все підряд
+DIGEST_WINDOW_HOURS = 48  # "найкращі за останні два дні" — а не тільки цей прогін
+
+
+def _score_key(listing: dict[str, Any]) -> float:
+    score = (listing.get("claude") or {}).get("score")
+    return score if isinstance(score, (int, float)) else -1  # без оцінки — в кінець списку
 
 
 def _load_sites() -> list[dict]:
@@ -183,17 +190,26 @@ async def cmd_digest(message: Message) -> None:
 
     await message.answer("Збираю поточні оголошення, це може зайняти хвилину...")
     listings, _source_stats = await run_all_parsers()
-    to_send, _score_stats = await score_new_listings(listings)
+    fresh, _score_stats = await score_new_listings(listings)
 
     storage.mark_seen_bulk([item["external_id"] for item in listings])
 
-    if not to_send:
-        await message.answer("Підходящих оголошень зараз не знайдено (після хард-фільтрів і скорингу).")
+    if fresh:
+        storage.add_matched(fresh)
+
+    # "Найкращі за останні два дні" — не тільки щойно спарсене, а й усе, що вже
+    # пройшло фільтр+скоринг за останні DIGEST_WINDOW_HOURS годин (могло бути
+    # надіслане раніше, це нормально для дайджесту-підсумку). Найкращі за
+    # скорингом — згори.
+    recent = storage.get_recent_matched(hours=DIGEST_WINDOW_HOURS)
+    combined = {item["external_id"]: item for item in recent}
+    combined.update({item["external_id"]: item for item in fresh})
+    ranked = sorted(combined.values(), key=_score_key, reverse=True)[:DIGEST_LIMIT]
+
+    if not ranked:
+        await message.answer("Підходящих оголошень за останні два дні не знайдено (після хард-фільтрів і скорингу).")
         return
 
-    storage.add_matched(to_send)
-
-    for listing in to_send:
+    await message.answer(f"Топ {len(ranked)} оголошень за останні два дні (за скорингом):")
+    for listing in ranked:
         await send_listing(message.bot, message.chat.id, listing)
-
-    await message.answer(f"Готово: {len(to_send)} оголошень.")

@@ -23,7 +23,7 @@ load_dotenv(BASE_DIR / ".env")
 
 API_KEY = os.environ.get("ANTHROPIC_API_KEY")
 MODEL = "claude-sonnet-5"
-MAX_TOKENS = 1500
+MAX_TOKENS = 2048
 PROMPT_FILE = BASE_DIR / "claude_prompt.txt"
 
 # Поля оголошення, які реально потрібні Claude для аналізу — без raw_snapshot
@@ -81,7 +81,10 @@ def _parse_response(text: str) -> dict[str, Any] | None:
         except json.JSONDecodeError:
             pass
 
-    logger.error("Не вдалося розпарсити відповідь Claude як JSON: %s", text[:500])
+    # Логуємо повністю (без обрізання) — інакше неможливо відрізнити "Claude
+    # дійсно обрізав відповідь через ліміт токенів" від "просто зайвий текст
+    # навколо JSON", коли розбираємось з цим самим логом пізніше.
+    logger.error("Не вдалося розпарсити відповідь Claude як JSON (довжина=%d): %s", len(text), text)
     return None
 
 
@@ -102,6 +105,12 @@ async def score_listing(listing: dict[str, Any], nearby_objects: list[dict[str, 
     except Exception:
         logger.exception("Помилка виклику Claude API для %s", listing.get("url"))
         return None
+
+    if response.stop_reason == "max_tokens":
+        logger.error(
+            "Відповідь Claude обрізана лімітом MAX_TOKENS=%d для %s — збільш ліміт",
+            MAX_TOKENS, listing.get("url"),
+        )
 
     text = "".join(block.text for block in response.content if block.type == "text")
     return _parse_response(text)

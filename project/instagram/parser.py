@@ -25,10 +25,12 @@ load_dotenv(BASE_DIR.parent / ".env")
 
 USERNAME = os.environ.get("INSTAGRAM_USERNAME")
 PASSWORD = os.environ.get("INSTAGRAM_PASSWORD")
+SESSIONID = os.environ.get("INSTAGRAM_SESSIONID")
 SESSION_FILE = BASE_DIR / "session.json"
 
 ACCOUNTS_CONFIG = BASE_DIR / "accounts.json"
 STATE_FILE = BASE_DIR / "state.json"  # {"<username>": "<pk найновішого обробленого поста>"}
+MEDIA_CACHE_DIR = BASE_DIR / "media_cache"
 
 SOURCE_NAME = "instagram"
 POSTS_PER_ACCOUNT = 12  # скільки останніх постів перевіряти за один цикл
@@ -65,23 +67,67 @@ def _get_client() -> Client | None:
 
     client = Client()
     client.load_settings(SESSION_FILE)
-    client.login(USERNAME, PASSWORD)  # з валідною сесією instagrapi не робить повторний повний логін
+    try:
+        client.login(USERNAME, PASSWORD)  # з валідною сесією instagrapi не робить повторний повний логін
+    except Exception:
+        # Збережена сесія протухла — instagrapi сам спробував релогін через
+        # пароль, а це падає з "Your version of Instagram is out of date"
+        # (поточний баг instagrapi, див. login_instagram.py). Якщо є
+        # INSTAGRAM_SESSIONID — пробуємо відновитись через нього автоматично,
+        # той самий обхід, що і при першому ручному логіні.
+        if not SESSIONID:
+            logger.exception(
+                "Логін Instagram не вдався і INSTAGRAM_SESSIONID не задано в .env — "
+                "пропускаю instagram-парсер цього циклу"
+            )
+            return None
+        logger.warning("Звичайний логін Instagram не вдався, пробую відновити сесію через INSTAGRAM_SESSIONID")
+        try:
+            client.login_by_sessionid(SESSIONID)
+        except Exception:
+            logger.exception(
+                "INSTAGRAM_SESSIONID теж не спрацював — потрібен новий вручну "
+                "(python instagram/login_instagram.py)"
+            )
+            return None
+        client.dump_settings(SESSION_FILE)  # зберігаємо оновлену робочу сесію
+        logger.info("Instagram: сесію відновлено через INSTAGRAM_SESSIONID")
+
     return client
 
 
-def _media_photos(media: Media) -> list[str]:
-    """Всі фото/відео поста (включно з каруселлю-альбомом) як прямі URL."""
-    items = media.resources or [media]
-    urls: list[str] = []
-    for item in items:
+def _download_media_item(client: Client, item: Any, filename: str) -> str | None:
+    """Качає фото/відео на диск через авторизовану сесію instagrapi.
+
+    Instagram CDN не дає Telegram-серверу самому підтягнути ці URL напряму
+    (запит падає з "WEBPAGE_CURL_FAILED") — тому качаємо самі і завантажуємо
+    в Telegram уже готові байти, як і з Telegram-каналів (telegam/channels.py)."""
+    MEDIA_CACHE_DIR.mkdir(exist_ok=True)
+    try:
         if item.video_url:
-            urls.append(str(item.video_url))
+            path = client.video_download_by_url(str(item.video_url), filename=filename, folder=MEDIA_CACHE_DIR)
         elif item.thumbnail_url:
-            urls.append(str(item.thumbnail_url))
-    return urls
+            path = client.photo_download_by_url(str(item.thumbnail_url), filename=filename, folder=MEDIA_CACHE_DIR)
+        else:
+            return None
+        return str(path)
+    except Exception:
+        logger.exception("Не вдалося завантажити медіа %s", filename)
+        return None
 
 
-def _normalize_post(media: Media, username: str) -> dict[str, Any]:
+def _media_photos(client: Client, media: Media) -> list[str]:
+    """Всі фото/відео поста (включно з каруселлю-альбомом), завантажені локально."""
+    items = media.resources or [media]
+    paths: list[str] = []
+    for idx, item in enumerate(items):
+        path = _download_media_item(client, item, f"post_{media.pk}_{idx}")
+        if path:
+            paths.append(path)
+    return paths
+
+
+def _normalize_post(client: Client, media: Media, username: str) -> dict[str, Any]:
     return {
         "source": SOURCE_NAME,
         "url": f"https://www.instagram.com/p/{media.code}/",
@@ -102,15 +148,15 @@ def _normalize_post(media: Media, username: str) -> dict[str, Any]:
         "address": media.location.name if media.location else None,
         "lat": media.location.lat if media.location else None,
         "lon": media.location.lng if media.location else None,
-        "photos": _media_photos(media),
+        "photos": _media_photos(client, media),
         "contact": None,
         "features": [],
         "raw_snapshot": {"media_type": media.media_type, "pk": str(media.pk), "username": username},
     }
 
 
-def _normalize_story(story: Story, username: str) -> dict[str, Any]:
-    photo = str(story.video_url) if story.video_url else (str(story.thumbnail_url) if story.thumbnail_url else None)
+def _normalize_story(client: Client, story: Story, username: str) -> dict[str, Any]:
+    photo = _download_media_item(client, story, f"story_{story.pk}")
     return {
         "source": SOURCE_NAME,
         "url": f"https://www.instagram.com/stories/{username}/{story.pk}/",
@@ -166,13 +212,13 @@ async def parse(accounts: list[str] | None = None) -> list[dict[str, Any]]:
             for media in medias:
                 if last_pk and str(media.pk) == str(last_pk):
                     break  # дійшли до вже обробленого поста — далі все старе
-                listings.append(_normalize_post(media, username))
+                listings.append(_normalize_post(client, media, username))
             if medias:
                 state[username] = str(medias[0].pk)  # найновіший — нова точка відліку
 
             stories = client.user_stories(user_id)
             for story in stories:
-                listings.append(_normalize_story(story, username))
+                listings.append(_normalize_story(client, story, username))
 
             logger.info("%s: перевірено %d постів, %d сторіз", username, len(medias), len(stories))
         except Exception:

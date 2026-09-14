@@ -192,6 +192,12 @@ async def parser_loop(bot: Bot) -> None:
     while True:
         try:
             pipeline_log.cycle_start()
+            is_bootstrap_cycle = not storage.is_bootstrapped()
+            if is_bootstrap_cycle:
+                logger.info(
+                    "Перший запуск: формуємо базову лінію (усе поточне позначаємо "
+                    "як 'вже бачене', без розсилки підписникам)"
+                )
 
             listings, source_stats = await run_all_parsers()
             new_listings = [item for item in listings if not storage.is_seen(item["external_id"])]
@@ -209,19 +215,33 @@ async def parser_loop(bot: Bot) -> None:
                 logger.info("Пройшли хард-фільтри і поріг скорингу: %d", len(to_send))
                 storage.add_matched(to_send)
 
+            # На першому запуску (bootstrap) навмисно НЕ розсилаємо — інакше кожен,
+            # хто вже написав /start, отримав би "потоп" з усього, що на цей момент
+            # просто вже існує на ринку. Далі, з наступного циклу, розсилка йде як
+            # звичайно — тільки те, що справді щойно з'явилось.
+            #
             # Фото (включно з локальними з Telegram-джерел) навмисно НЕ видаляються
             # після відправки — вони лишаються на диску, щоб /start новим підписникам
             # міг показати ці ж оголошення з фото пізніше. Видаляються лише коли
             # оголошення випадає зі storage.matched_listings.json за лімітом.
-            for listing in to_send:
-                for chat_id in storage.active_subscriber_ids():
-                    await send_listing(bot, chat_id, listing)
+            if not is_bootstrap_cycle:
+                for listing in to_send:
+                    for chat_id in storage.active_subscriber_ids():
+                        await send_listing(bot, chat_id, listing)
 
             storage.mark_seen_bulk([item["external_id"] for item in new_listings])
-            pipeline_log.cycle_result(sent=len(to_send))
+            if is_bootstrap_cycle:
+                storage.mark_bootstrapped()
+            pipeline_log.cycle_result(sent=0 if is_bootstrap_cycle else len(to_send))
 
             if admin_chat_id:
-                report = _build_admin_report(source_stats, new_counts, len(new_listings), score_stats, len(to_send))
+                sent_count = 0 if is_bootstrap_cycle else len(to_send)
+                report = _build_admin_report(source_stats, new_counts, len(new_listings), score_stats, sent_count)
+                if is_bootstrap_cycle:
+                    report = (
+                        f"🚀 Перший запуск — сформована базова лінія ({len(to_send)} оголошень "
+                        "збережено, розсилку підписникам пропущено)\n\n" + report
+                    )
                 await _notify_admin(bot, admin_chat_id, report)
         except Exception as exc:
             logger.exception("Помилка в циклі парсингу")

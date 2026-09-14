@@ -29,6 +29,13 @@ PASSWORD = os.environ.get("INSTAGRAM_PASSWORD")
 SESSIONID = os.environ.get("INSTAGRAM_SESSIONID")
 SESSION_FILE = BASE_DIR / "session.json"
 
+# Аварійний вимикач: коли Instagram позначає акаунт як підозрілий
+# (scraping_warning), кожна нова спроба логіну (навіть невдала) тільки
+# продовжує "гріти" підозру. INSTAGRAM_ENABLED=false в .env повністю зупиняє
+# будь-які звернення до Instagram (без логіну і без запитів) — щоб дати
+# акаунту "охолонути" — і не потребує зміни коду чи перезбірки образу.
+INSTAGRAM_ENABLED = os.environ.get("INSTAGRAM_ENABLED", "true").strip().lower() not in ("0", "false", "no")
+
 ACCOUNTS_CONFIG = BASE_DIR / "accounts.json"
 STATE_FILE = BASE_DIR / "state.json"  # {"<username>": "<pk найновішого обробленого поста>"}
 MEDIA_CACHE_DIR = BASE_DIR / "media_cache"
@@ -220,6 +227,10 @@ async def parse(accounts: list[str] | None = None) -> list[dict[str, Any]]:
     сам виклик блокуючий. Якщо це почне заважати event loop-у бота, обгорнути
     у asyncio.to_thread() — поки що обсяг акаунтів для цього замалий.
     """
+    if not INSTAGRAM_ENABLED:
+        logger.info("INSTAGRAM_ENABLED=false в .env — пропускаю instagram-парсер (без жодних звернень до Instagram)")
+        return []
+
     client = _get_client()
     if client is None:
         return []

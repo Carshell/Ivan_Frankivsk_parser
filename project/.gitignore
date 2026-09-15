@@ -14,6 +14,7 @@ telegam/channels_output.json
 telegam/media_cache/
 instagram/session.json
 instagram/state.json
+instagram/last_run.json
 instagram/instagram_output.json
 instagram/media_cache/
 web_pages/dom_ria_output.json

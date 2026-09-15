@@ -8,9 +8,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import os
+import random
+import time
 from pathlib import Path
 from typing import Any
 
@@ -36,12 +39,42 @@ SESSION_FILE = BASE_DIR / "session.json"
 # акаунту "охолонути" — і не потребує зміни коду чи перезбірки образу.
 INSTAGRAM_ENABLED = os.environ.get("INSTAGRAM_ENABLED", "true").strip().lower() not in ("0", "false", "no")
 
+# Instagram банить/попереджає за занадто часті запити з одного акаунта —
+# рахувати його разом з класифайдами (кожні 30 хв, main.PARSE_INTERVAL_SECONDS)
+# і без того було ризиковано. Instagram/FB — раз на кілька годин (ТЗ, п.7).
+# +jitter, щоб інтервал не був підозріло рівним щоразу.
+INSTAGRAM_PARSE_INTERVAL_SECONDS = int(os.environ.get("INSTAGRAM_PARSE_INTERVAL_SECONDS", str(3 * 60 * 60)))
+INSTAGRAM_PARSE_JITTER_SECONDS = int(os.environ.get("INSTAGRAM_PARSE_JITTER_SECONDS", str(30 * 60)))
+LAST_RUN_FILE = BASE_DIR / "last_run.json"
+
 ACCOUNTS_CONFIG = BASE_DIR / "accounts.json"
 STATE_FILE = BASE_DIR / "state.json"  # {"<username>": "<pk найновішого обробленого поста>"}
 MEDIA_CACHE_DIR = BASE_DIR / "media_cache"
 
 SOURCE_NAME = "instagram"
 POSTS_PER_ACCOUNT = 12  # скільки останніх постів перевіряти за один цикл
+
+
+def _seconds_until_next_run() -> float:
+    """>0 — ще зарано парсити знову; <=0 — можна. Читає з диска (не з пам'яті
+    процесу), щоб рестарт контейнера не скидав таймер і не тригерив миттєвий
+    повторний парсинг одразу після деплою."""
+    if not LAST_RUN_FILE.exists():
+        return 0.0
+    try:
+        data = json.loads(LAST_RUN_FILE.read_text(encoding="utf-8"))
+        next_at = data["last_run_at"] + data["interval_used"]
+    except (json.JSONDecodeError, KeyError):
+        return 0.0
+    return next_at - time.time()
+
+
+def _mark_run_now() -> None:
+    interval = INSTAGRAM_PARSE_INTERVAL_SECONDS + random.uniform(0, INSTAGRAM_PARSE_JITTER_SECONDS)
+    LAST_RUN_FILE.write_text(
+        json.dumps({"last_run_at": time.time(), "interval_used": interval}, ensure_ascii=False),
+        encoding="utf-8",
+    )
 
 
 def _load_json(path: Path, default):
@@ -71,7 +104,12 @@ _client: Client | None = None
 
 # Випадкова пауза (сек) перед кожним приватним запитом instagrapi — робить
 # трафік менш схожим на бота, ніж рівномірний запит-у-запит без затримок.
-DELAY_RANGE = [1, 3]
+DELAY_RANGE = [2, 6]
+
+# Додаткова пауза (сек) між акаунтами (не між окремими запитами instagrapi
+# всередині одного акаунта — це вже DELAY_RANGE) — щоб не бити по API суцільним
+# потоком запитів навіть з урахуванням DELAY_RANGE.
+ACCOUNT_DELAY_RANGE = (5, 12)
 
 
 def _build_client() -> Client | None:
@@ -231,6 +269,19 @@ async def parse(accounts: list[str] | None = None) -> list[dict[str, Any]]:
         logger.info("INSTAGRAM_ENABLED=false в .env — пропускаю instagram-парсер (без жодних звернень до Instagram)")
         return []
 
+    wait_left = _seconds_until_next_run()
+    if wait_left > 0:
+        logger.info(
+            "Instagram: ще ~%.0f хв до наступного дозволеного парсингу (інтервал ~%.1f год) — пропускаю цей цикл",
+            wait_left / 60, INSTAGRAM_PARSE_INTERVAL_SECONDS / 3600,
+        )
+        return []
+
+    # Позначаємо спробу ОДРАЗУ, ще до самого логіну — навіть невдалий логін це
+    # вже звернення до Instagram і не повинен ретраїтись частіше за інтервал
+    # (саме часті повторні спроби після невдачі і "гріють" підозру найбільше).
+    _mark_run_now()
+
     client = _get_client()
     if client is None:
         return []
@@ -242,7 +293,9 @@ async def parse(accounts: list[str] | None = None) -> list[dict[str, Any]]:
     state = _load_json(STATE_FILE, {})
     listings: list[dict[str, Any]] = []
 
-    for username in accounts:
+    for idx, username in enumerate(accounts):
+        if idx > 0:
+            await asyncio.sleep(random.uniform(*ACCOUNT_DELAY_RANGE))
         try:
             user_id = client.user_id_from_username(username)
             last_pk = state.get(username)

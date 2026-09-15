@@ -81,6 +81,15 @@
     "note": "OLX не публікує координати/точну адресу — lat/lon завжди null для цього джерела."
   },
   {
+    "name": "olx_apartments_filtered",
+    "enabled": true,
+    "module": "olx.py",
+    "base_url": "https://www.olx.ua",
+    "search_url": "https://www.olx.ua/uk/nedvizhimost/kvartiry/dolgosrochnaya-arenda-kvartir/ivano-frankovsk/?currency=UAH&search%5Bfilter_float_floor:to%5D=6&search%5Bfilter_float_total_floors:to%5D=7&search%5Bfilter_float_total_area:from%5D=60&search%5Bfilter_enum_number_of_rooms_string%5D%5B0%5D=trehkomnatnye&search%5Bfilter_enum_number_of_rooms_string%5D%5B1%5D=chetyrehkomnatnye&search%5Bfilter_enum_number_of_rooms_string%5D%5B2%5D=pyatikomnatnye",
+    "parser_type": "playwright",
+    "note": "Оренда квартир: 3-5 кімнат, площа від 60 м², поверх до 6, будинок до 7 поверхів. OLX не публікує координати — lat/lon завжди null."
+  },
+  {
     "name": "orenda_if_ua",
     "enabled": false,
     "module": "orenda_if_ua.py",

@@ -135,6 +135,24 @@
     "note": "flatfy.ua — той самий агрегатор, що й lun.ua (спільні дані/CDN) — значний перетин оголошень з lun_ua, поки немає крос-джерельного дедупу за адресою/фото."
   },
   {
+    "name": "flatfy_apartments_autonomy",
+    "enabled": true,
+    "module": "flatfy.py",
+    "base_url": "https://flatfy.ua",
+    "search_url": "https://flatfy.ua/uk/search?area_min=60&autonomy_power=true&built_year_min=2000&currency=USD&floor_max=6&geo_id=10008717&has_eoselia=false&is_without_fee=false&price_min=700&price_sqm_currency=USD&room_count=3&room_count=4&room_count=5&section_id=2&sort=relevance",
+    "parser_type": "playwright",
+    "note": "Квартири (section_id=2): 3-5 кімнат, від 60 м², поверх до 6, будинок від 2000 р., енергонезалежність."
+  },
+  {
+    "name": "flatfy_apartments",
+    "enabled": true,
+    "module": "flatfy.py",
+    "base_url": "https://flatfy.ua",
+    "search_url": "https://flatfy.ua/uk/search?area_min=60&currency=USD&floor_max=6&geo_id=10008717&has_eoselia=false&is_without_fee=false&price_min=700&price_sqm_currency=USD&room_count=3&room_count=4&room_count=5&section_id=2&sort=relevance",
+    "parser_type": "playwright",
+    "note": "Квартири (section_id=2): 3-5 кімнат, від 60 м², поверх до 6 (без вимоги енергонезалежності/року будівництва)."
+  },
+  {
     "name": "m2bomber",
     "enabled": true,
     "module": "m2bomber.py",

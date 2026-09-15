@@ -54,6 +54,14 @@ APARTMENT_MARKERS = ("квартир",)
 PRICE_MIN_USD = 1300
 PRICE_MAX_USD = 4000
 
+# Замовник шукає ЛИШЕ оренду — продаж не повинен потрапляти в бот НІКОЛИ,
+# незалежно від того, чи увімкнені інші хард-фільтри (main.ENABLE_HARD_FILTERS).
+SALE_KEYWORDS = (
+    "продаж", "продам", "продасться", "продається", "продати",
+    "купівля-продаж", "терміновий продаж", "терміново продам", "на продаж",
+)
+RENT_KEYWORDS = ("оренда", "оренду", "оренди", "здам", "здається", "здаю", "rent")
+
 
 def _text_blob(listing: dict[str, Any]) -> str:
     parts = [listing.get("title") or "", listing.get("address") or "", listing.get("description") or ""]
@@ -89,6 +97,25 @@ def matches_price(listing: dict[str, Any]) -> bool:
     if price is None:
         return True  # немає ціни (наприклад "договірна") — не можемо перевірити, пропускаємо
     return PRICE_MIN_USD <= price <= PRICE_MAX_USD
+
+
+def is_sale_listing(listing: dict[str, Any]) -> bool:
+    """True, якщо оголошення про ПРОДАЖ, а не оренду — має відсіюватись завжди,
+    незалежно від ENABLE_HARD_FILTERS (замовника продаж не цікавить в принципі).
+
+    Заголовок/перший рядок — пріоритетний сигнал: якщо там прямо написано
+    "оренда"/"здам", довіряємо цьому, навіть якщо десь у тілі тексту
+    згадується "продаж" (наприклад, "є можливість подальшого викупу").
+    Немає жодного явного сигналу (ні оренда, ні продаж) — не відсіюємо,
+    як і в решті хард-фільтрів цього модуля."""
+    title = (listing.get("title") or "").lower()
+    if any(k in title for k in RENT_KEYWORDS):
+        return False
+    if any(k in title for k in SALE_KEYWORDS):
+        return True
+
+    blob = _text_blob(listing)
+    return any(k in blob for k in SALE_KEYWORDS) and not any(k in blob for k in RENT_KEYWORDS)
 
 
 def passes_hard_filters(listing: dict[str, Any]) -> bool:

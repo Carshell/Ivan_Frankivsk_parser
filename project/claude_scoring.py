@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
@@ -34,6 +35,37 @@ _LISTING_FIELDS_FOR_CLAUDE = (
     "address", "lat", "lon", "features",
 )
 
+# Instagram Stories не мають підпису взагалі (description завжди порожній) —
+# єдиний доступний сигнал про те, що на фото і чи це оренда, а не продаж чи
+# щось стороннє, це саме зображення. Прикріпляємо фото до запиту тільки коли
+# тексту реально нема — щоб не роздувати кожен виклик зображеннями там, де
+# опис і так усе каже.
+MAX_IMAGES_PER_REQUEST = 3
+MAX_IMAGE_BYTES = 5 * 1024 * 1024  # ліміт Anthropic API на одне зображення
+_IMAGE_MEDIA_TYPES = {".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".png": "image/png", ".webp": "image/webp"}
+
+
+def _is_local_path(value: str) -> bool:
+    return not value.startswith(("http://", "https://"))
+
+
+def _image_block(path: str) -> dict[str, Any] | None:
+    file_path = Path(path)
+    media_type = _IMAGE_MEDIA_TYPES.get(file_path.suffix.lower())
+    if media_type is None:
+        return None
+    try:
+        data = file_path.read_bytes()
+    except OSError:
+        return None
+    if len(data) > MAX_IMAGE_BYTES:
+        logger.warning("Фото %s завелике (%d байт) — пропускаю для аналізу Claude", path, len(data))
+        return None
+    return {
+        "type": "image",
+        "source": {"type": "base64", "media_type": media_type, "data": base64.b64encode(data).decode("ascii")},
+    }
+
 _client: anthropic.AsyncAnthropic | None = None
 
 
@@ -50,9 +82,31 @@ def _load_prompt() -> str:
     return PROMPT_FILE.read_text(encoding="utf-8")
 
 
-def _build_input(listing: dict[str, Any], nearby_objects: list[dict[str, Any]]) -> str:
+def _build_content(listing: dict[str, Any], nearby_objects: list[dict[str, Any]]) -> list[dict[str, Any]]:
     trimmed = {k: listing.get(k) for k in _LISTING_FIELDS_FOR_CLAUDE}
-    return json.dumps({"listing": trimmed, "nearby_objects": nearby_objects}, ensure_ascii=False)
+    text = json.dumps({"listing": trimmed, "nearby_objects": nearby_objects}, ensure_ascii=False)
+    content: list[dict[str, Any]] = [{"type": "text", "text": text}]
+
+    has_description = bool((listing.get("description") or "").strip())
+    if not has_description:
+        local_photos = [p for p in (listing.get("photos") or []) if _is_local_path(p)]
+        for photo in local_photos[:MAX_IMAGES_PER_REQUEST]:
+            block = _image_block(photo)
+            if block:
+                content.append(block)
+        if len(content) > 1:
+            content.append(
+                {
+                    "type": "text",
+                    "text": (
+                        "У цього оголошення немає тексту опису (наприклад, Instagram Story без "
+                        "підпису) — визнач тип нерухомості, оренда це чи продаж, і оцінку ЛИШЕ "
+                        "з доданих вище фото, за інструкцією в системному промпті."
+                    ),
+                }
+            )
+
+    return content
 
 
 def _parse_response(text: str) -> dict[str, Any] | None:
@@ -100,7 +154,7 @@ async def score_listing(listing: dict[str, Any], nearby_objects: list[dict[str, 
             model=MODEL,
             max_tokens=MAX_TOKENS,
             system=_load_prompt(),
-            messages=[{"role": "user", "content": _build_input(listing, nearby_objects)}],
+            messages=[{"role": "user", "content": _build_content(listing, nearby_objects)}],
         )
     except Exception:
         logger.exception("Помилка виклику Claude API для %s", listing.get("url"))

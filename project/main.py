@@ -137,10 +137,16 @@ async def score_new_listings(listings: list[dict]) -> tuple[list[dict], dict]:
     """
     result = []
     hard_passed = 0
+    sale_rejected = 0
     claude_unavailable = 0
     below_threshold = 0
 
     for listing in listings:
+        # Завжди, незалежно від ENABLE_HARD_FILTERS — замовника продаж не
+        # цікавить в принципі, це не той самий "тимчасово вимкнений" фільтр.
+        if hard_filters.is_sale_listing(listing):
+            sale_rejected += 1
+            continue
         if ENABLE_HARD_FILTERS and not hard_filters.passes_hard_filters(listing):
             continue
         hard_passed += 1
@@ -161,11 +167,14 @@ async def score_new_listings(listings: list[dict]) -> tuple[list[dict], dict]:
 
     stats = {
         "considered": len(listings),
+        "sale_rejected": sale_rejected,
         "hard_passed": hard_passed,
         "claude_scored": hard_passed - claude_unavailable,
         "claude_unavailable": claude_unavailable,
         "below_threshold": below_threshold,
     }
+    if sale_rejected:
+        pipeline_log.sale_filter_result(sale_rejected, len(listings))
     pipeline_log.hard_filter_result(hard_passed, len(listings))
     pipeline_log.claude_summary(
         scored=stats["claude_scored"],
@@ -206,6 +215,9 @@ def _build_admin_report(
             lines.append(f"🔁 Дублікатів (те саме джерело/об'єкт іншим сайтом): {duplicate_count}")
     else:
         lines.append("\n🆕 Нових оголошень немає")
+
+    if score_stats.get("sale_rejected"):
+        lines.append(f"🚫 Продаж (не оренда): {score_stats['sale_rejected']} відсіяно")
 
     lines.append(
         f"✅ Хард-фільтр: {score_stats['hard_passed']} із {score_stats['considered']} пройшли\n"

@@ -63,6 +63,10 @@ def duplicates_result(duplicates: int, total: int) -> None:
     _logger.info("%-14s | %d із %d відсіяно як дублікат іншого джерела", "дедуп", duplicates, total)
 
 
+def sale_filter_result(rejected: int, total: int) -> None:
+    _logger.info("%-14s | %d із %d відсіяно як ПРОДАЖ (не оренда)", "продаж", rejected, total)
+
+
 def hard_filter_result(passed: int, total: int) -> None:
     _logger.info("%-14s | %d із %d пройшли", "хард-фільтр", passed, total)
 

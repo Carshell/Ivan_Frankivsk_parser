@@ -54,6 +54,24 @@
     "note": "Оренда будинків (realty_type=0), Івано-Франківськ + 30 км."
   },
   {
+    "name": "dom_ria_apartments",
+    "enabled": true,
+    "module": "dom_ria.py",
+    "base_url": "https://dom.ria.com",
+    "search_url": "https://dom.ria.com/uk/arenda-kvartir/ivano-frankovsk/",
+    "parser_type": "playwright",
+    "note": "Оренда квартир, Івано-Франківськ, без додаткових фільтрів (категорійна сторінка)."
+  },
+  {
+    "name": "dom_ria_apartments_filtered",
+    "enabled": true,
+    "module": "dom_ria.py",
+    "base_url": "https://dom.ria.com",
+    "search_url": "https://dom.ria.com/uk/search?excludeSold=1&category=1&realty_type=2&operation=3&state_id=15&price_cur=1&wo_dupl=1&sort=inspected_sort&firstIteraction=false&city_ids=15&client=searchV2&limit=20&type=list&ch=209_f_3,209_t_0,214_f_70,214_t_0,227_t_6,235_f_500,235_t_0,246_243",
+    "parser_type": "playwright",
+    "note": "Оренда квартир з фільтром (ch=): кімнати від 3, площа від 70 м², поверх до 6."
+  },
+  {
     "name": "olx",
     "enabled": true,
     "module": "olx.py",

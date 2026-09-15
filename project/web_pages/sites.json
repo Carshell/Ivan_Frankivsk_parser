@@ -108,6 +108,24 @@
     "note": "Категорія 'квартири' (flats-rent) з демо-URL. lun.ua частково агрегує ці ж оголошення під /realty/{id} — можна порівняти для дедуплікації."
   },
   {
+    "name": "rieltor_ua_apartments_rooms",
+    "enabled": true,
+    "module": "rieltor_ua.py",
+    "base_url": "https://rieltor.ua",
+    "search_url": "https://rieltor.ua/ivano-frankovsk/flats-rent/?currency=2&price_min=600&radius=10&sort=-default&rooms%5B0%5D=3&rooms%5B1%5D=4&rooms%5B2%5D=5&rooms%5B3%5D=6",
+    "parser_type": "playwright",
+    "note": "Квартири: 3-6 кімнат, радіус 10 км від центру."
+  },
+  {
+    "name": "rieltor_ua_apartments_autonomy",
+    "enabled": true,
+    "module": "rieltor_ua.py",
+    "base_url": "https://rieltor.ua",
+    "search_url": "https://rieltor.ua/ivano-frankovsk/flats-rent/?currency=2&price_min=600&radius=10&sort=-default&common_area_min=70&autonomy_power=1&floor_min=1&floor_max=6&rooms%5B0%5D=3&rooms%5B1%5D=4&rooms%5B2%5D=5&rooms%5B3%5D=6",
+    "parser_type": "playwright",
+    "note": "Квартири: 3-6 кімнат, площа від 70 м², поверх 1-6, енергонезалежність, радіус 10 км."
+  },
+  {
     "name": "flatfy",
     "enabled": true,
     "module": "flatfy.py",

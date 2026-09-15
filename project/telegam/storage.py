@@ -9,6 +9,9 @@
                             на /start, без повторного парсингу чи виклику Claude
   bootstrap_done.flag   -- ознака "перший запуск вже сформував базову лінію"
                             (див. is_bootstrapped/mark_bootstrapped)
+  sent_messages.json    -- {"<delete_token>": [{"chat_id", "message_ids"}, ...]}
+                            куди пішло кожне оголошення під час розсилки — щоб
+                            адмін міг видалити його в усіх чатах одразу
 """
 
 from __future__ import annotations
@@ -24,6 +27,8 @@ SEEN_FILE = DATA_DIR / "seen.json"
 MATCHED_FILE = DATA_DIR / "matched_listings.json"
 MAX_STORED_MATCHED = 200  # запобіжник, щоб файл не ріс нескінченно
 BOOTSTRAP_FLAG_FILE = DATA_DIR / "bootstrap_done.flag"
+SENT_MESSAGES_FILE = DATA_DIR / "sent_messages.json"
+MAX_STORED_DELETE_TOKENS = 300  # запобіжник, щоб файл не ріс нескінченно
 
 
 def _load_json(path: Path, default):
@@ -141,3 +146,32 @@ def is_bootstrapped() -> bool:
 
 def mark_bootstrapped() -> None:
     BOOTSTRAP_FLAG_FILE.write_text("done", encoding="utf-8")
+
+
+def record_sent_listing(delete_token: str, chat_id: int, message_ids: list[int]) -> None:
+    """Запам'ятовує, куди (chat_id) і які message_id пішли для одного
+    оголошення під час розсилки — щоб адмін міг пізніше видалити їх усі одним
+    натисканням кнопки (див. telegam/bot.py, callback "del:<token>").
+
+    Один delete_token = одне оголошення одного циклу розсилки; кожен виклик
+    додає ще один чат до вже наявного списку для цього ж токена."""
+    if not message_ids:
+        return
+    data = _load_json(SENT_MESSAGES_FILE, {})
+    data.setdefault(delete_token, []).append({"chat_id": chat_id, "message_ids": message_ids})
+
+    if len(data) > MAX_STORED_DELETE_TOKENS:
+        for key in list(data.keys())[: len(data) - MAX_STORED_DELETE_TOKENS]:
+            del data[key]
+
+    _save_json(SENT_MESSAGES_FILE, data)
+
+
+def pop_sent_records(delete_token: str) -> list[dict[str, Any]]:
+    """Забирає (і видаляє з диска) записи про надіслані повідомлення для
+    токена — використовується один раз, при натисканні кнопки видалення."""
+    data = _load_json(SENT_MESSAGES_FILE, {})
+    records = data.pop(delete_token, [])
+    if records:
+        _save_json(SENT_MESSAGES_FILE, data)
+    return records

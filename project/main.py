@@ -20,6 +20,7 @@ import importlib
 import json
 import logging
 import os
+import secrets
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher
@@ -290,8 +291,12 @@ async def parser_loop(bot: Bot) -> None:
             # оголошення випадає зі storage.matched_listings.json за лімітом.
             if not is_bootstrap_cycle:
                 for listing in to_send:
+                    # Один токен на оголошення (не на чат) — щоб адмін міг
+                    # видалити його одразу в усіх чатах підписників одним
+                    # натисканням кнопки (telegam/bot.py: cb_delete_everywhere).
+                    delete_token = secrets.token_hex(8)
                     for chat_id in storage.active_subscriber_ids():
-                        await send_listing(bot, chat_id, listing)
+                        await send_listing(bot, chat_id, listing, delete_token=delete_token)
                         await asyncio.sleep(1.2)  # уникнути flood control Telegram при пачці оголошень
 
             storage.mark_seen_bulk([item["external_id"] for item in new_listings_all])

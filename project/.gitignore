@@ -7,6 +7,7 @@ telegam/seen.json
 telegam/matched_listings.json
 telegam/dedup_signatures.json
 telegam/bootstrap_done.flag
+telegam/sent_messages.json
 telegam/channels_session.session
 telegam/channels_session.session-journal
 telegam/channels_state.json

@@ -9,16 +9,27 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 from pathlib import Path
 from typing import Any, Awaitable, Callable, TypeVar
 
-from aiogram import Bot, Router
+from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.filters import Command
-from aiogram.types import FSInputFile, InputMediaPhoto, Message
+from aiogram.types import (
+    CallbackQuery,
+    FSInputFile,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    InputMediaPhoto,
+    Message,
+)
+from dotenv import load_dotenv
 
 import dedup
 from telegam import storage
+
+load_dotenv(Path(__file__).parent.parent / ".env")
 
 logger = logging.getLogger(__name__)
 
@@ -31,6 +42,9 @@ DIGEST_WINDOW_HOURS = 48  # "найкращі за останні два дні"
 TELEGRAM_MEDIA_CAPTION_LIMIT = 1024  # ліміт Telegram для підпису фото/альбому
 TELEGRAM_MESSAGE_LIMIT = 4096  # ліміт Telegram для звичайного текстового повідомлення
 SEND_DELAY_SECONDS = 1.2  # пауза між оголошеннями в одному чаті — щоб не ловити flood control
+
+_admin_chat_id_raw = os.environ.get("ADMIN_CHAT_ID")
+ADMIN_CHAT_ID = int(_admin_chat_id_raw) if _admin_chat_id_raw else None
 
 _T = TypeVar("_T")
 
@@ -128,7 +142,9 @@ def _is_remote_url(photo: str) -> bool:
     return photo.startswith(("http://", "https://"))
 
 
-async def send_listing(bot: Bot, chat_id: int, listing: dict[str, Any]) -> None:
+async def send_listing(
+    bot: Bot, chat_id: int, listing: dict[str, Any], delete_token: str | None = None
+) -> None:
     """Надсилає оголошення. Фото можуть бути або URL (lun.ua тощо), або локальним
     файлом (Telegram-канали качають фото собі на диск, бо в них немає публічного URL).
 
@@ -148,9 +164,17 @@ async def send_listing(bot: Bot, chat_id: int, listing: dict[str, Any]) -> None:
         оголошень (наприклад, з вимкненими фільтрами), Telegram тимчасово
         відмовляє і просить почекати N секунд; чекаємо і пробуємо ще раз
         замість того, щоб просто загубити оголошення.
+
+    delete_token — якщо задано (розсилка з main.parser_loop, а не /start чи
+    /digest), message_id усіх надісланих у цей чат повідомлень запам'ятовуються
+    під цим токеном (telegam/storage.record_sent_listing), а адміну (ADMIN_CHAT_ID)
+    додатково надсилається кнопка "Видалити в усіх" — щоб можна було одним
+    натисканням прибрати оголошення з чатів усіх підписників, якщо воно
+    виявилось помилковим/недоречним.
     """
     caption = format_listing_message(listing)
     photos = (listing.get("photos") or [])[:MAX_PHOTOS_PER_ALBUM]
+    sent_message_ids: list[int] = []
 
     try:
         if photos:
@@ -162,7 +186,8 @@ async def send_listing(bot: Bot, chat_id: int, listing: dict[str, Any]) -> None:
                 for i, photo in enumerate(photos)
             ]
             try:
-                await _call_with_flood_retry(lambda: bot.send_media_group(chat_id, media=media))
+                sent = await _call_with_flood_retry(lambda: bot.send_media_group(chat_id, media=media))
+                sent_message_ids.extend(m.message_id for m in sent)
             except TelegramBadRequest as exc:
                 if "WEBPAGE_CURL_FAILED" not in str(exc):
                     raise
@@ -170,23 +195,72 @@ async def send_listing(bot: Bot, chat_id: int, listing: dict[str, Any]) -> None:
                     "Оголошення %s: Telegram не зміг завантажити фото за URL — надсилаю без фото",
                     listing.get("external_id"),
                 )
-                await _call_with_flood_retry(
+                sent = await _call_with_flood_retry(
                     lambda: bot.send_message(chat_id, _truncate(caption, TELEGRAM_MESSAGE_LIMIT))
                 )
-                return
-            if len(caption) > TELEGRAM_MEDIA_CAPTION_LIMIT:
-                await _call_with_flood_retry(
-                    lambda: bot.send_message(chat_id, _truncate(caption, TELEGRAM_MESSAGE_LIMIT))
-                )
+                sent_message_ids.append(sent.message_id)
+            else:
+                # else виконується лише якщо send_media_group НЕ впав з винятком —
+                # тобто фото успішно пішли і тут ще не надсилали текст-фолбек вище.
+                if len(caption) > TELEGRAM_MEDIA_CAPTION_LIMIT:
+                    sent = await _call_with_flood_retry(
+                        lambda: bot.send_message(chat_id, _truncate(caption, TELEGRAM_MESSAGE_LIMIT))
+                    )
+                    sent_message_ids.append(sent.message_id)
         else:
-            await _call_with_flood_retry(
+            sent = await _call_with_flood_retry(
                 lambda: bot.send_message(chat_id, _truncate(caption, TELEGRAM_MESSAGE_LIMIT))
             )
+            sent_message_ids.append(sent.message_id)
     except Exception:
         logger.exception(
             "Не вдалося надіслати оголошення %s в чат %s",
             listing.get("external_id"), chat_id,
         )
+        return
+
+    if delete_token and sent_message_ids:
+        storage.record_sent_listing(delete_token, chat_id, sent_message_ids)
+        if ADMIN_CHAT_ID is not None and chat_id == ADMIN_CHAT_ID:
+            keyboard = InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text="🗑 Видалити в усіх", callback_data=f"del:{delete_token}")]]
+            )
+            try:
+                await bot.send_message(chat_id, "🛠 Це оголошення пішло всім підписникам.", reply_markup=keyboard)
+            except Exception:
+                logger.exception("Не вдалося надіслати адміну кнопку видалення для %s", listing.get("external_id"))
+
+
+@router.callback_query(F.data.startswith("del:"))
+async def cb_delete_everywhere(callback: CallbackQuery) -> None:
+    """Адмін натиснув «Видалити в усіх» під своєю копією розісланого
+    оголошення — видаляє те саме оголошення з чатів УСІХ підписників, кому
+    воно пішло (за message_id, записаними в send_listing)."""
+    if ADMIN_CHAT_ID is None or callback.from_user is None or callback.from_user.id != ADMIN_CHAT_ID:
+        await callback.answer("Лише адмін може це робити.", show_alert=True)
+        return
+
+    token = callback.data.split(":", 1)[1]
+    records = storage.pop_sent_records(token)
+    if not records:
+        await callback.answer("Записів для видалення не знайдено (можливо, вже видалено раніше).", show_alert=True)
+        return
+
+    deleted, failed = 0, 0
+    for record in records:
+        for message_id in record["message_ids"]:
+            try:
+                await callback.bot.delete_message(record["chat_id"], message_id)
+                deleted += 1
+            except Exception:
+                failed += 1
+
+    if callback.message is not None:
+        await callback.message.edit_text(
+            f"🗑 Видалено з {len(records)} чатів ({deleted} повідомлень"
+            + (f", {failed} не вдалося — вже видалені або застарі)" if failed else ")")
+        )
+    await callback.answer("Готово")
 
 
 @router.message(Command("start"))

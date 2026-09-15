@@ -71,10 +71,10 @@ def hard_filter_result(passed: int, total: int) -> None:
     _logger.info("%-14s | %d із %d пройшли", "хард-фільтр", passed, total)
 
 
-def claude_summary(scored: int, unavailable: int, below_threshold: int) -> None:
+def claude_summary(scored: int, unavailable: int, below_threshold: int, hard_rejected: int = 0) -> None:
     _logger.info(
-        "%-14s | оцінено=%d недоступно=%d нижче_порогу=%d",
-        "claude", scored, unavailable, below_threshold,
+        "%-14s | оцінено=%d недоступно=%d нижче_порогу=%d hard_reject=%d",
+        "claude", scored, unavailable, below_threshold, hard_rejected,
     )
 
 

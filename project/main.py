@@ -138,6 +138,7 @@ async def score_new_listings(listings: list[dict]) -> tuple[list[dict], dict]:
     result = []
     hard_passed = 0
     sale_rejected = 0
+    claude_hard_rejected = 0
     claude_unavailable = 0
     below_threshold = 0
 
@@ -157,6 +158,12 @@ async def score_new_listings(listings: list[dict]) -> tuple[list[dict], dict]:
 
         if claude_result is None:
             claude_unavailable += 1
+        elif claude_result.get("hard_reject"):
+            # Завжди, незалежно від ENABLE_SCORE_THRESHOLD — це не поріг
+            # скорингу, а явна відмова: Claude знайшов у тексті пряму заяву,
+            # що критичної вимоги (укриття тощо) немає взагалі.
+            claude_hard_rejected += 1
+            continue
         elif ENABLE_SCORE_THRESHOLD:
             score = claude_result.get("score")
             if isinstance(score, (int, float)) and score < SCORE_THRESHOLD:
@@ -168,6 +175,7 @@ async def score_new_listings(listings: list[dict]) -> tuple[list[dict], dict]:
     stats = {
         "considered": len(listings),
         "sale_rejected": sale_rejected,
+        "claude_hard_rejected": claude_hard_rejected,
         "hard_passed": hard_passed,
         "claude_scored": hard_passed - claude_unavailable,
         "claude_unavailable": claude_unavailable,
@@ -180,6 +188,7 @@ async def score_new_listings(listings: list[dict]) -> tuple[list[dict], dict]:
         scored=stats["claude_scored"],
         unavailable=claude_unavailable,
         below_threshold=below_threshold,
+        hard_rejected=claude_hard_rejected,
     )
     return result, stats
 
@@ -223,6 +232,7 @@ def _build_admin_report(
         f"✅ Хард-фільтр: {score_stats['hard_passed']} із {score_stats['considered']} пройшли\n"
         f"🤖 Claude: оцінено {score_stats['claude_scored']}, "
         f"недоступно {score_stats['claude_unavailable']}, "
+        f"явно відхилено (hard_reject) {score_stats.get('claude_hard_rejected', 0)}, "
         f"нижче порогу {score_stats['below_threshold']}\n"
         f"📤 Надіслано підписникам: {sent}"
     )

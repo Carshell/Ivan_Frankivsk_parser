@@ -9,6 +9,42 @@
     "note": "Категорія 'будинки' (houses), сортування за часом додавання (insert_time) — щойно опубліковані зверху."
   },
   {
+    "name": "lun_ua_flats_shelter_pets",
+    "enabled": true,
+    "module": "lun.py",
+    "base_url": "https://lun.ua",
+    "search_url": "https://lun.ua/rent/if/flats?price_min=700&price_max=8000&currency=USD&pets_allowed_full=yes&shelter=underground_parking&area_min=65&floor_max=6",
+    "parser_type": "playwright",
+    "note": "Квартири: підземний паркінг як укриття, можна з тваринами, від 65 м², поверх до 6."
+  },
+  {
+    "name": "lun_ua_flats_big_rooms",
+    "enabled": true,
+    "module": "lun.py",
+    "base_url": "https://lun.ua",
+    "search_url": "https://lun.ua/rent/if/flats?price_min=400&price_max=8000&currency=USD&area_min=45&floor_count_min=1&room_count=3&room_count=4&room_count=5&floor_count_max=7",
+    "parser_type": "playwright",
+    "note": "Квартири: 3-5 кімнат, від 45 м², поверх 1-7."
+  },
+  {
+    "name": "lun_ua_flats_big_rooms_shelter",
+    "enabled": true,
+    "module": "lun.py",
+    "base_url": "https://lun.ua",
+    "search_url": "https://lun.ua/rent/if/flats?price_min=600&price_max=8000&currency=USD&area_min=45&floor_count_min=1&room_count=3&room_count=4&room_count=5&floor_count_max=7&pets_allowed_full=yes&shelter=underground_parking&shelter=basement&shelter=special",
+    "parser_type": "playwright",
+    "note": "Квартири: 3-5 кімнат, від 45 м², укриття (паркінг/підвал/спецсховище), можна з тваринами."
+  },
+  {
+    "name": "lun_ua_houses_autonomy",
+    "enabled": true,
+    "module": "lun.py",
+    "base_url": "https://lun.ua",
+    "search_url": "https://lun.ua/rent/if/houses?price_min=700&price_max=8000&currency=USD&pets_allowed_full=yes&room_count=4&room_count=5&autonomy_power=true",
+    "parser_type": "playwright",
+    "note": "Будинки: 4-5 кімнат, енергонезалежність, можна з тваринами."
+  },
+  {
     "name": "dom_ria",
     "enabled": true,
     "module": "dom_ria.py",

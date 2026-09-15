@@ -42,6 +42,12 @@ SITES_CONFIG = BASE_DIR / "web_pages" / "sites.json"
 PARSE_INTERVAL_SECONDS = 30 * 60  # класифайди — раз на 30 хв (ТЗ, п.7)
 SCORE_THRESHOLD = 50  # нижче — в архів, у Telegram не йде (ТЗ, п.7)
 
+# Скільки Playwright-браузерів (сайтів) парсити одночасно, а не по черзі.
+# З 19 джерелами послідовний прохід ризикував не вкластись у
+# PARSE_INTERVAL_SECONDS; забагато одночасних Chromium — ризик вичерпати
+# RAM сервера. Підбирай під реальні ресурси сервера через .env, без правки коду.
+MAX_CONCURRENT_SITE_PARSERS = int(os.environ.get("MAX_CONCURRENT_SITE_PARSERS", "3"))
+
 # Тимчасово (за проханням користувача): усе нове йде в бот без відсіву —
 # Claude лише додає короткий аналіз/скоринг/безпеку до повідомлення, але
 # нічого не відкидає. Поставити назад True, щоб повернути п.3/п.7 ТЗ.
@@ -53,8 +59,32 @@ def _load_sites() -> list[dict]:
     return json.loads(SITES_CONFIG.read_text(encoding="utf-8"))
 
 
+async def _run_site_parser(site: dict, semaphore: asyncio.Semaphore) -> tuple[list[dict], dict]:
+    """Парсить одне джерело з web_pages/sites.json під семафором (обмежує
+    кількість одночасно відкритих Playwright-браузерів)."""
+    module_name = Path(site["module"]).stem
+    async with semaphore:
+        try:
+            module = importlib.import_module(f"web_pages.{module_name}")
+            listings = await module.parse(search_url=site["search_url"])
+            logger.info("%s: знайдено %d оголошень", site["name"], len(listings))
+            pipeline_log.source_result(site["name"], found=len(listings))
+            return listings, {"name": site["name"], "found": len(listings), "error": None}
+        except Exception as exc:
+            logger.exception("Парсер %s впав, пропускаю цей цикл", site["name"])
+            pipeline_log.source_result(site["name"], error=str(exc))
+            return [], {"name": site["name"], "found": 0, "error": str(exc)}
+
+
 async def run_all_parsers() -> tuple[list[dict], list[dict]]:
     """Викликає parse() кожного увімкненого джерела з web_pages/sites.json.
+
+    Сайти парсяться ПАРАЛЕЛЬНО (до MAX_CONCURRENT_SITE_PARSERS одночасно) —
+    послідовний прохід через 19+ джерел ризикував не вкластись у
+    PARSE_INTERVAL_SECONDS. Telegram-канали і Instagram лишаються
+    послідовними після сайтів (інша технологія — Telethon/instagrapi, не
+    Playwright, і instagrapi під капотом блокуючий, тож паралелити його з
+    рештою без окремого потоку немає сенсу).
 
     Падіння одного парсера не зупиняє інші — просто логується і пропускається.
     Повертає (усі оголошення, статистика по кожному джерелу) — друге потрібне
@@ -63,21 +93,12 @@ async def run_all_parsers() -> tuple[list[dict], list[dict]]:
     all_listings: list[dict] = []
     source_stats: list[dict] = []
 
-    for site in _load_sites():
-        if not site.get("enabled") or not site.get("module"):
-            continue
-        module_name = Path(site["module"]).stem
-        try:
-            module = importlib.import_module(f"web_pages.{module_name}")
-            listings = await module.parse(search_url=site["search_url"])
-            logger.info("%s: знайдено %d оголошень", site["name"], len(listings))
-            pipeline_log.source_result(site["name"], found=len(listings))
-            source_stats.append({"name": site["name"], "found": len(listings), "error": None})
-            all_listings.extend(listings)
-        except Exception as exc:
-            logger.exception("Парсер %s впав, пропускаю цей цикл", site["name"])
-            pipeline_log.source_result(site["name"], error=str(exc))
-            source_stats.append({"name": site["name"], "found": 0, "error": str(exc)})
+    sites = [site for site in _load_sites() if site.get("enabled") and site.get("module")]
+    semaphore = asyncio.Semaphore(MAX_CONCURRENT_SITE_PARSERS)
+    results = await asyncio.gather(*(_run_site_parser(site, semaphore) for site in sites))
+    for listings, stat in results:
+        source_stats.append(stat)
+        all_listings.extend(listings)
 
     try:
         tg_listings = await telegram_channels.parse()

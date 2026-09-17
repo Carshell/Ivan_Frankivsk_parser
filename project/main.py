@@ -62,12 +62,21 @@ def _load_sites() -> list[dict]:
 
 async def _run_site_parser(site: dict, semaphore: asyncio.Semaphore) -> tuple[list[dict], dict]:
     """Парсить одне джерело з web_pages/sites.json під семафором (обмежує
-    кількість одночасно відкритих Playwright-браузерів)."""
+    кількість одночасно відкритих Playwright-браузерів).
+
+    Кожне оголошення тегується city/property_type ІЗ КОНФІГА джерела (а не
+    з тексту) — це надійно, бо кожен під-пошук у sites.json вже фільтрує по
+    URL/query саме те місто й тип, на відміну від вільного тексту
+    Telegram-каналів чи Instagram (там тип визначається евристикою, див.
+    hard_filters.detect_property_type, а місто завжди ivano-frankivsk)."""
     module_name = Path(site["module"]).stem
     async with semaphore:
         try:
             module = importlib.import_module(f"web_pages.{module_name}")
             listings = await module.parse(search_url=site["search_url"])
+            for listing in listings:
+                listing["city"] = site.get("city")
+                listing["property_type"] = site.get("property_type")
             logger.info("%s: знайдено %d оголошень", site["name"], len(listings))
             pipeline_log.source_result(site["name"], found=len(listings))
             return listings, {"name": site["name"], "found": len(listings), "error": None}
@@ -103,6 +112,12 @@ async def run_all_parsers() -> tuple[list[dict], list[dict]]:
 
     try:
         tg_listings = await telegram_channels.parse()
+        # Канали в telegam/channels.json налаштовані виключно на Івано-Франківськ —
+        # тип нерухомості тут вільний текст, тегуємо евристикою (None -> підходить
+        # під будь-який вибір підписника, а не ховається через невизначеність).
+        for listing in tg_listings:
+            listing["city"] = "ivano-frankivsk"
+            listing["property_type"] = hard_filters.detect_property_type(listing)
         logger.info("telegram-канали: знайдено %d оголошень", len(tg_listings))
         pipeline_log.source_result("telegram", found=len(tg_listings))
         source_stats.append({"name": "telegram", "found": len(tg_listings), "error": None})
@@ -114,6 +129,10 @@ async def run_all_parsers() -> tuple[list[dict], list[dict]]:
 
     try:
         ig_listings = await instagram_parser.parse()
+        # Акаунти в instagram/accounts.json теж усі про Івано-Франківськ.
+        for listing in ig_listings:
+            listing["city"] = "ivano-frankivsk"
+            listing["property_type"] = hard_filters.detect_property_type(listing)
         logger.info("instagram: знайдено %d оголошень", len(ig_listings))
         pipeline_log.source_result("instagram", found=len(ig_listings))
         source_stats.append({"name": "instagram", "found": len(ig_listings), "error": None})
@@ -296,6 +315,11 @@ async def parser_loop(bot: Bot) -> None:
                     # натисканням кнопки (telegam/bot.py: cb_delete_everywhere).
                     delete_token = secrets.token_hex(8)
                     for chat_id in storage.active_subscriber_ids():
+                        prefs = storage.get_preferences(chat_id)
+                        if not hard_filters.matches_subscriber_preferences(
+                            listing, prefs["cities"], prefs["property_types"]
+                        ):
+                            continue
                         await send_listing(bot, chat_id, listing, delete_token=delete_token)
                         await asyncio.sleep(1.2)  # уникнути flood control Telegram при пачці оголошень
 

@@ -1,7 +1,11 @@
 """Проста файлова персистенція для бота — тимчасово, до підключення Postgres/Redis (п.11 ТЗ).
 
 Зберігає:
-  subscribers.json      -- {"<chat_id>": {"paused": bool}}
+  subscribers.json      -- {"<chat_id>": {"paused": bool, "cities": [...]|відсутнє,
+                            "property_types": [...]|відсутнє}} — cities/property_types
+                            з'являються лише після завершення майстра вибору в /start
+                            (telegam/bot.py, OnboardingStates); відсутність — "ще не
+                            обирав", а не "нічого не підходить" (див. has_preferences)
   seen.json             -- список external_id оголошень, які вже надсилались
                             (щоб не дублювати між циклами парсингу)
   matched_listings.json -- оголошення, що пройшли хард-фільтр і поріг скорингу
@@ -59,6 +63,31 @@ def set_paused(chat_id: int, paused: bool) -> None:
 def active_subscriber_ids() -> list[int]:
     subs = _load_json(SUBSCRIBERS_FILE, {})
     return [int(chat_id) for chat_id, info in subs.items() if not info.get("paused")]
+
+
+def set_city_preferences(chat_id: int, cities: list[str]) -> None:
+    subs = _load_json(SUBSCRIBERS_FILE, {})
+    subs.setdefault(str(chat_id), {"paused": False})["cities"] = cities
+    _save_json(SUBSCRIBERS_FILE, subs)
+
+
+def set_property_type_preferences(chat_id: int, property_types: list[str]) -> None:
+    subs = _load_json(SUBSCRIBERS_FILE, {})
+    subs.setdefault(str(chat_id), {"paused": False})["property_types"] = property_types
+    _save_json(SUBSCRIBERS_FILE, subs)
+
+
+def get_preferences(chat_id: int) -> dict[str, list[str] | None]:
+    subs = _load_json(SUBSCRIBERS_FILE, {})
+    info = subs.get(str(chat_id), {})
+    return {"cities": info.get("cities"), "property_types": info.get("property_types")}
+
+
+def has_preferences(chat_id: int) -> bool:
+    """True, лише якщо підписник ПОВНІСТЮ пройшов майстер вибору (обидва
+    кроки — міста і тип нерухомості). Інакше /start повторно запускає майстер."""
+    prefs = get_preferences(chat_id)
+    return bool(prefs["cities"]) and bool(prefs["property_types"])
 
 
 def is_seen(external_id: str) -> bool:

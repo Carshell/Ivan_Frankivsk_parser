@@ -1,48 +1,27 @@
-"""Хард-фільтри до Claude (п.3 ТЗ): регіон, тип нерухомості, ціна.
+"""Хард-фільтри до Claude (п.3 ТЗ): продаж/оренда, ціна, відповідність
+вибору підписника (місто + тип нерухомості).
+
+Регіон і тип нерухомості БІЛЬШЕ НЕ універсальний блокуючий хард-фільтр —
+відколи з'явився вибір міста/типу в /start (кожен підписник обирає, що
+саме йому показувати), ці два виміри стали персональним фільтром доставки
+(matches_subscriber_preferences), а не спільним для всіх відсівом. Джерела
+з web_pages/sites.json вже позначені точним "city"/"property_type" при
+парсингу (main._run_site_parser) — довіряти тексту тут більше не треба.
+Telegram-канали й Instagram не мають такого тегування на рівні джерела,
+тому для них тип визначається текстовою евристикою (detect_property_type).
 
 Дедуплікація "чи вже надсилали раніше" — окрема відповідальність
 (telegam/storage.py, за external_id), тут не дублюється.
 
-Тип нерухомості перевіряється по-різному залежно від джерела:
-- lun.ua, dom.ria, olx, m2bomber, flatfy.ua самі фільтрують по типу на рівні
-  URL/query (houses/realty_type=0/doma/house-rent/section_id=4) — їм довіряємо
-  без текстового аналізу (дехто, як dom.ria, взагалі не пише "будинок" явно в
-  адресі — просто "вулиця Х", і текстовий пошук ключових слів там завжди
-  провалювався б).
-- Telegram-канали, Instagram і rieltor_ua (зараз налаштований на flats-rent)
-  такого попереднього фільтра не мають — для них тип визначається текстовою
-  евристикою (шукаємо ключові слова в заголовку/адресі/описі), так само, як у
-  telegam/channels.py.
-
-Загальний принцип: коли даних бракує (немає ціни, немає чіткої згадки регіону
-чи типу нерухомості) — краще пропустити оголошення далі, ніж мовчки відсіяти
-щось підходяще через неповні дані джерела. Відсіюємо лише коли є явний
-НЕГАТИВНИЙ сигнал (точно вказано "квартира" без жодної згадки будинку, точно
-вказано інше велике місто, ціна явно поза діапазоном) — не за відсутністю
-позитивного сигналу.
+Загальний принцип (як і раніше): коли даних бракує — краще пропустити
+оголошення далі, ніж мовчки відсіяти щось підходяще через неповні дані
+джерела. Відсіюємо лише за явним НЕГАТИВНИМ сигналом, не за відсутністю
+позитивного.
 """
 
 from __future__ import annotations
 
 from typing import Any
-
-REGION_LOCALITIES = (
-    "івано-франківськ", "крихівці", "ямниця", "угорники", "черніїв",
-    "тисменичани", "вовчинець", "вовчинецька", "микитинці", "опришівці",
-    "опришiвцi", "княгинин", "пасічна", "будівельників",
-)
-
-# Явно ІНШІ великі міста — якщо згадане одне з них і жодної нашої локації,
-# це справжній негативний сигнал (не просто "бракує даних").
-OTHER_MAJOR_CITIES = (
-    "київ", "львів", "одеса", "харків", "дніпро", "запоріжжя", "вінниця",
-    "тернопіль", "чернівці", "ужгород", "хмельницький", "рівне", "луцьк",
-    "полтава", "черкаси", "суми", "житомир", "миколаїв", "херсон",
-    "кропивницький", "чернігів",
-)
-
-# Джерела, де тип нерухомості вже відфільтрований на рівні URL самого сайту.
-HOUSE_FILTERED_SOURCES = {"lun.ua", "dom.ria", "olx", "m2bomber", "flatfy.ua"}
 
 HOUSE_KEYWORDS = (
     "будинок", "будинку", "будинка", "будиночок", "будинки",
@@ -68,28 +47,24 @@ def _text_blob(listing: dict[str, Any]) -> str:
     return " ".join(parts).lower()
 
 
-def matches_region(listing: dict[str, Any]) -> bool:
-    blob = _text_blob(listing)
-    if any(loc in blob for loc in REGION_LOCALITIES):
-        return True
-    # Немає нашої локації в тексті — це відмова, лише якщо натомість явно
-    # назване інше велике місто. Просто відсутність згадки (короткий заголовок,
-    # порожня адреса тощо) — не привід відсіювати.
-    return not any(city in blob for city in OTHER_MAJOR_CITIES)
+def detect_property_type(listing: dict[str, Any]) -> str | None:
+    """"house" | "apartment" | None (неоднозначно) — для джерел без явного
+    тегування типу (Telegram-канали, Instagram; сайти з web_pages/sites.json
+    вже мають listing["property_type"], сюди навіть не заходять — див.
+    matches_subscriber_preferences).
 
-
-def matches_house_type(listing: dict[str, Any]) -> bool:
-    if listing.get("source") in HOUSE_FILTERED_SOURCES:
-        return True
-
+    None навмисно не прирівнюється ні до house, ні до apartment: такі
+    оголошення показуються підписникам з БУДЬ-яким вибором типу, а не
+    ховаються через невизначеність."""
     blob = _text_blob(listing)
     title = (listing.get("title") or "").lower()
     looks_like_house = any(k in blob for k in HOUSE_KEYWORDS)
-    # Відсіюємо тільки явний негативний сигнал: заголовок прямо каже "квартира"
-    # і ніде нема згадки будинку. Якщо взагалі немає чіткого сигналу (ні
-    # "будинок", ні "квартира") — пропускаємо, а не відсіюємо.
-    looks_like_apartment_only = any(m in title for m in APARTMENT_MARKERS) and not looks_like_house
-    return not looks_like_apartment_only
+    looks_like_apartment = any(m in title for m in APARTMENT_MARKERS) and not looks_like_house
+    if looks_like_apartment:
+        return "apartment"
+    if looks_like_house:
+        return "house"
+    return None
 
 
 def matches_price(listing: dict[str, Any]) -> bool:
@@ -118,5 +93,29 @@ def is_sale_listing(listing: dict[str, Any]) -> bool:
     return any(k in blob for k in SALE_KEYWORDS) and not any(k in blob for k in RENT_KEYWORDS)
 
 
+def matches_subscriber_preferences(
+    listing: dict[str, Any], cities: list[str] | None, property_types: list[str] | None
+) -> bool:
+    """True, якщо оголошення підходить під вибір конкретного підписника
+    (майстер налаштувань після /start — міста і тип нерухомості).
+
+    cities/property_types порожні або None — вимір не звужений, усе підходить
+    (підписник ще не проходив майстер, або явно нічого не обмежував).
+    Оголошення без визначеного типу (detect_property_type() -> None,
+    трапляється для Telegram/Instagram без чіткого сигналу) підходить під
+    БУДЬ-який вибір типу — невизначеність не повинна ховати оголошення."""
+    if cities:
+        listing_city = listing.get("city")
+        if listing_city and listing_city not in cities:
+            return False
+
+    if property_types:
+        listing_type = listing.get("property_type") or detect_property_type(listing)
+        if listing_type and listing_type not in property_types:
+            return False
+
+    return True
+
+
 def passes_hard_filters(listing: dict[str, Any]) -> bool:
-    return matches_region(listing) and matches_house_type(listing) and matches_price(listing)
+    return matches_price(listing)

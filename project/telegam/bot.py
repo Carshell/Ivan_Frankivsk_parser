@@ -16,6 +16,8 @@ from typing import Any, Awaitable, Callable, TypeVar
 from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest, TelegramRetryAfter
 from aiogram.filters import Command
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
     CallbackQuery,
     FSInputFile,
@@ -27,6 +29,7 @@ from aiogram.types import (
 from dotenv import load_dotenv
 
 import dedup
+import hard_filters
 from telegam import storage
 
 load_dotenv(Path(__file__).parent.parent / ".env")
@@ -46,7 +49,26 @@ SEND_DELAY_SECONDS = 1.2  # пауза між оголошеннями в одн
 _admin_chat_id_raw = os.environ.get("ADMIN_CHAT_ID")
 ADMIN_CHAT_ID = int(_admin_chat_id_raw) if _admin_chat_id_raw else None
 
+# Майстер вибору міста/типу нерухомості (одразу після /start, поки підписник
+# ще не налаштований — див. OnboardingStates і cmd_start). Код (перший
+# елемент кортежу) — те, що зберігається в storage і звіряється з
+# listing["city"]/listing["property_type"]; підпис — те, що бачить користувач.
+CITY_OPTIONS: list[tuple[str, str]] = [
+    ("kyiv", "Київ"),
+    ("chernivtsi", "Чернівці"),
+    ("ivano-frankivsk", "Івано-Франківськ"),
+]
+PROPERTY_TYPE_OPTIONS: list[tuple[str, str]] = [
+    ("apartment", "Квартири"),
+    ("house", "Дома"),
+]
+
 _T = TypeVar("_T")
+
+
+class OnboardingStates(StatesGroup):
+    choosing_cities = State()
+    choosing_property_types = State()
 
 
 def _truncate(text: str, limit: int) -> str:
@@ -263,32 +285,50 @@ async def cb_delete_everywhere(callback: CallbackQuery) -> None:
     await callback.answer("Готово")
 
 
-@router.message(Command("start"))
-async def cmd_start(message: Message) -> None:
-    storage.add_subscriber(message.chat.id)
+def _label_for(options: list[tuple[str, str]], code: str) -> str:
+    return next((label for c, label in options if c == code), code)
+
+
+def _build_choice_keyboard(options: list[tuple[str, str]], selected: set[str], prefix: str) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=(f"✅ {label}" if code in selected else label), callback_data=f"{prefix}:{code}")]
+        for code, label in options
+    ]
+    rows.append([InlineKeyboardButton(text="Підтвердити", callback_data=f"{prefix}:confirm")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def _start_onboarding(message: Message, state: FSMContext) -> None:
+    await state.set_state(OnboardingStates.choosing_cities)
+    await state.update_data(cities=[])
     await message.answer(
-        "Вітаю! Це бот моніторингу оренди будинків в Івано-Франківській області.\n\n"
-        "/digest — перевірити оголошення зараз\n"
-        "/pause — призупинити розсилку\n"
-        "/resume — відновити розсилку\n"
-        "/filters — активні джерела та фільтри\n\n"
-        "Кожне оголошення проходить хард-фільтри (регіон/тип/ціна) і скоринг "
-        "Claude за твоїм профілем — зі скорингом та блоком безпеки."
+        "Обери місто(а), де шукати оренду (можна декілька — тицяєш, з'являється ✅), "
+        "а тоді тисни «Підтвердити»:",
+        reply_markup=_build_choice_keyboard(CITY_OPTIONS, set(), "city"),
     )
 
-    # Показуємо вже знайдені раніше оголошення одразу — без нового парсингу чи
-    # повторного виклику Claude, просто те, що вже накопичено в matched_listings.json.
-    matched = storage.get_matched()
+
+async def _deliver_initial_listings(bot: Bot, chat_id: int, prefs: dict[str, list[str] | None]) -> None:
+    """Показує вже знайдені раніше оголошення, що підходять під вибір
+    підписника, або (якщо таких ще нема) одразу запускає повний парсинг —
+    спільна частина для cmd_start (уже налаштований підписник) і фіналу
+    майстра вибору (щойно налаштувався)."""
+    cities, property_types = prefs["cities"], prefs["property_types"]
+    matched = [
+        listing
+        for listing in storage.get_matched(limit=0)
+        if hard_filters.matches_subscriber_preferences(listing, cities, property_types)
+    ]
     if matched:
-        await message.answer(f"Ось {len(matched)} вже знайдених оголошень, що відповідають фільтрам:")
+        await bot.send_message(chat_id, f"Ось {len(matched)} вже знайдених оголошень під твій вибір:")
         for listing in matched:
-            await send_listing(message.bot, message.chat.id, listing)
+            await send_listing(bot, chat_id, listing)
             await asyncio.sleep(SEND_DELAY_SECONDS)
         return
 
-    # Бази ще немає (перший запуск, або щойно очистили reset_matched_db.py) —
-    # не чекаємо плановий цикл (до 30 хв), а одразу запускаємо парсинг.
-    await message.answer("Оголошень ще немає в базі — запускаю перший парсинг зараз, це може зайняти кілька хвилин...")
+    await bot.send_message(
+        chat_id, "Оголошень під твій вибір ще немає в базі — запускаю парсинг зараз, це може зайняти кілька хвилин..."
+    )
     from main import run_all_parsers, score_new_listings
 
     listings, _source_stats = await run_all_parsers()
@@ -298,14 +338,120 @@ async def cmd_start(message: Message) -> None:
     if to_send:
         storage.add_matched(to_send)
 
-    if not to_send:
-        await message.answer("Поки що нічого не знайдено. Спробуй пізніше або команду /digest.")
+    filtered = [
+        listing for listing in to_send if hard_filters.matches_subscriber_preferences(listing, cities, property_types)
+    ]
+    if not filtered:
+        await bot.send_message(chat_id, "Поки що нічого підхожого не знайдено. Спробуй пізніше або команду /digest.")
         return
 
-    await message.answer(f"Знайдено {len(to_send)} оголошень:")
-    for listing in to_send:
-        await send_listing(message.bot, message.chat.id, listing)
+    await bot.send_message(chat_id, f"Знайдено {len(filtered)} оголошень під твій вибір:")
+    for listing in filtered:
+        await send_listing(bot, chat_id, listing)
         await asyncio.sleep(SEND_DELAY_SECONDS)
+
+
+@router.callback_query(OnboardingStates.choosing_cities, F.data.startswith("city:"))
+async def cb_choose_city(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.data is None or callback.message is None:
+        return
+    code = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    selected = set(data.get("cities", []))
+
+    if code == "confirm":
+        if not selected:
+            await callback.answer("Обери хоча б одне місто.", show_alert=True)
+            return
+        cities = sorted(selected)
+        await state.update_data(cities=cities, property_types=[])
+        await state.set_state(OnboardingStates.choosing_property_types)
+        await callback.message.edit_text(
+            "Міста: " + ", ".join(_label_for(CITY_OPTIONS, c) for c in cities) + " ✅"
+        )
+        await callback.message.answer(
+            "Тепер обери тип нерухомості (можна обидва):",
+            reply_markup=_build_choice_keyboard(PROPERTY_TYPE_OPTIONS, set(), "ptype"),
+        )
+        await callback.answer()
+        return
+
+    selected.symmetric_difference_update({code})
+    await state.update_data(cities=list(selected))
+    await callback.message.edit_reply_markup(reply_markup=_build_choice_keyboard(CITY_OPTIONS, selected, "city"))
+    await callback.answer()
+
+
+@router.callback_query(OnboardingStates.choosing_property_types, F.data.startswith("ptype:"))
+async def cb_choose_property_type(callback: CallbackQuery, state: FSMContext) -> None:
+    if callback.data is None or callback.message is None:
+        return
+    code = callback.data.split(":", 1)[1]
+    data = await state.get_data()
+    selected = set(data.get("property_types", []))
+
+    if code == "confirm":
+        if not selected:
+            await callback.answer("Обери хоча б один тип.", show_alert=True)
+            return
+        cities = data.get("cities", [])
+        property_types = sorted(selected)
+        chat_id = callback.message.chat.id
+        storage.set_city_preferences(chat_id, cities)
+        storage.set_property_type_preferences(chat_id, property_types)
+        await state.clear()
+
+        await callback.message.edit_text(
+            "Готово! Міста: " + ", ".join(_label_for(CITY_OPTIONS, c) for c in cities) + ".\n"
+            "Типи: " + ", ".join(_label_for(PROPERTY_TYPE_OPTIONS, p) for p in property_types) + ".\n"
+            "Налаштування збережено — надалі надсилатиму лише те, що підходить "
+            "(змінити вибір можна командою /preferences)."
+        )
+        await callback.answer("Збережено")
+        await _deliver_initial_listings(
+            callback.message.bot, chat_id, {"cities": cities, "property_types": property_types}
+        )
+        return
+
+    selected.symmetric_difference_update({code})
+    await state.update_data(property_types=list(selected))
+    await callback.message.edit_reply_markup(
+        reply_markup=_build_choice_keyboard(PROPERTY_TYPE_OPTIONS, selected, "ptype")
+    )
+    await callback.answer()
+
+
+@router.message(Command("start"))
+async def cmd_start(message: Message, state: FSMContext) -> None:
+    storage.add_subscriber(message.chat.id)
+
+    if not storage.has_preferences(message.chat.id):
+        await message.answer(
+            "Вітаю! Це бот моніторингу оренди нерухомості.\n\n"
+            "Спершу оберемо, що саме тобі показувати — це займе два кроки."
+        )
+        await _start_onboarding(message, state)
+        return
+
+    await message.answer(
+        "З поверненням!\n\n"
+        "/digest — перевірити оголошення зараз\n"
+        "/pause — призупинити розсилку\n"
+        "/resume — відновити розсилку\n"
+        "/filters — активні джерела\n"
+        "/preferences — змінити вибір міст і типу нерухомості\n\n"
+        "Кожне оголошення проходить хард-фільтр (продаж/ціна) і скоринг "
+        "Claude за профілем замовника — зі скорингом та блоком безпеки."
+    )
+
+    prefs = storage.get_preferences(message.chat.id)
+    await _deliver_initial_listings(message.bot, message.chat.id, prefs)
+
+
+@router.message(Command("preferences"))
+async def cmd_preferences(message: Message, state: FSMContext) -> None:
+    await message.answer("Обираємо заново.")
+    await _start_onboarding(message, state)
 
 
 @router.message(Command("pause"))
@@ -322,18 +468,30 @@ async def cmd_resume(message: Message) -> None:
 
 @router.message(Command("filters"))
 async def cmd_filters(message: Message) -> None:
-    sites = _load_sites()
-    lines = ["Активні джерела:"]
-    for site in sites:
-        if site.get("enabled"):
-            lines.append(f"• {site['name']}: {site['search_url']}")
-    if len(lines) == 1:
-        lines.append("(жодного увімкненого джерела в web_pages/sites.json)")
+    prefs = storage.get_preferences(message.chat.id)
+    lines = []
+    if prefs["cities"] or prefs["property_types"]:
+        cities_txt = ", ".join(_label_for(CITY_OPTIONS, c) for c in prefs["cities"] or []) or "—"
+        types_txt = ", ".join(_label_for(PROPERTY_TYPE_OPTIONS, p) for p in prefs["property_types"] or []) or "—"
+        lines.append(f"Твій вибір: міста — {cities_txt}; тип — {types_txt} (/preferences — змінити)\n")
+
+    lines.append("Активні джерела:")
+    site_lines = [
+        f"• {site['name']} [{site.get('city')}/{site.get('property_type')}]: {site['search_url']}"
+        for site in _load_sites()
+        if site.get("enabled")
+    ]
+    lines.extend(site_lines or ["(жодного увімкненого джерела в web_pages/sites.json)"])
     await message.answer("\n".join(lines))
 
 
 @router.message(Command("digest"))
 async def cmd_digest(message: Message) -> None:
+    if not storage.has_preferences(message.chat.id):
+        await message.answer("Спершу пройди налаштування через /start — обери міста і тип нерухомості.")
+        return
+    prefs = storage.get_preferences(message.chat.id)
+
     # локальний імпорт — уникаємо циклічної залежності з main.py
     from main import run_all_parsers, score_new_listings
 
@@ -350,11 +508,16 @@ async def cmd_digest(message: Message) -> None:
     # "Найкращі за останні два дні" — не тільки щойно спарсене, а й усе, що вже
     # пройшло фільтр+скоринг за останні DIGEST_WINDOW_HOURS годин (могло бути
     # надіслане раніше, це нормально для дайджесту-підсумку). Найкращі за
-    # скорингом — згори.
+    # скорингом — згори. Фільтруємо під вибір саме цього підписника (місто/тип).
     recent = storage.get_recent_matched(hours=DIGEST_WINDOW_HOURS)
     combined = {item["external_id"]: item for item in recent}
     combined.update({item["external_id"]: item for item in fresh})
-    ranked = sorted(combined.values(), key=_score_key, reverse=True)[:DIGEST_LIMIT]
+    matching = [
+        listing
+        for listing in combined.values()
+        if hard_filters.matches_subscriber_preferences(listing, prefs["cities"], prefs["property_types"])
+    ]
+    ranked = sorted(matching, key=_score_key, reverse=True)[:DIGEST_LIMIT]
 
     if not ranked:
         await message.answer("Підходящих оголошень за останні два дні не знайдено (після хард-фільтрів і скорингу).")

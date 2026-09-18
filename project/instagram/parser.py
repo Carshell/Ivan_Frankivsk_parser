@@ -1,9 +1,19 @@
-"""Парсер Instagram-акаунтів (instagrapi): пости (фото/відео/текст) + Stories.
+"""Парсер Instagram: пости (фото/відео/Reels) + Stories конкретних акаунтів
+(instagram/accounts.json), а також пошук постів/Reels за хештегами
+(instagram/hashtags.json) — обидва списки city-теговані під три міста (ТЗ, п.6:
+"Хештеги: #орендаіванофранківськ, #нерухомістьіванофранківськ..."; той самий
+патерн застосовано і до Києва/Чернівців).
 
-Каркасний етап — без хард-фільтрів (ціна/тип нерухомості). Профіль замовника
-і скоринг — окремий модуль Claude (п.9 ТЗ), буде додано пізніше.
+Stories НЕ підтягуються за хештегом — Instagram не дає стабільного публічного
+API для пошуку Stories за тегом (на відміну від постів), і вони живуть лише
+24 год, тож наздогнати їх пошуком все одно нереально; Stories й далі йдуть
+лише з акаунтів зі списку (client.user_stories).
 
-Перед першим запуском потрібен один інтерактивний вхід — див. login_instagram.py.
+instagrapi синхронний під капотом — і хештег-пошук, і акаунти виконуються в
+межах того самого гейту за інтервалом (INSTAGRAM_PARSE_INTERVAL_SECONDS), тож
+хештеги додають обсяг запитів за один прогін, а не частоту звернень до
+Instagram. Перед першим запуском потрібен один інтерактивний вхід — див.
+login_instagram.py.
 """
 
 from __future__ import annotations
@@ -39,6 +49,13 @@ SESSION_FILE = BASE_DIR / "session.json"
 # акаунту "охолонути" — і не потребує зміни коду чи перезбірки образу.
 INSTAGRAM_ENABLED = os.environ.get("INSTAGRAM_ENABLED", "true").strip().lower() not in ("0", "false", "no")
 
+# Окремий вимикач лише для хештег-пошуку (акаунти й Stories далі працюють) —
+# якщо хештеги виявляться зайвим навантаженням/ризиком для акаунта, можна
+# вимкнути без зачіпання решти instagram-парсингу.
+INSTAGRAM_HASHTAG_SEARCH_ENABLED = os.environ.get(
+    "INSTAGRAM_HASHTAG_SEARCH_ENABLED", "true"
+).strip().lower() not in ("0", "false", "no")
+
 # Instagram банить/попереджає за занадто часті запити з одного акаунта —
 # рахувати його разом з класифайдами (кожні 30 хв, main.PARSE_INTERVAL_SECONDS)
 # і без того було ризиковано. Instagram/FB — раз на кілька годин (ТЗ, п.7).
@@ -48,11 +65,13 @@ INSTAGRAM_PARSE_JITTER_SECONDS = int(os.environ.get("INSTAGRAM_PARSE_JITTER_SECO
 LAST_RUN_FILE = BASE_DIR / "last_run.json"
 
 ACCOUNTS_CONFIG = BASE_DIR / "accounts.json"
+HASHTAGS_CONFIG = BASE_DIR / "hashtags.json"
 STATE_FILE = BASE_DIR / "state.json"  # {"<username>": "<pk найновішого обробленого поста>"}
 MEDIA_CACHE_DIR = BASE_DIR / "media_cache"
 
 SOURCE_NAME = "instagram"
 POSTS_PER_ACCOUNT = 12  # скільки останніх постів перевіряти за один цикл
+HASHTAG_MEDIA_LIMIT = 15  # скільки останніх постів/Reels перевіряти на один хештег за цикл
 
 
 def _seconds_until_next_run() -> float:
@@ -90,9 +109,14 @@ def _save_json(path: Path, data) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _load_accounts() -> list[str]:
+def _load_accounts() -> list[dict[str, Any]]:
     accounts = _load_json(ACCOUNTS_CONFIG, [])
-    return [a["username"] for a in accounts if a.get("enabled")]
+    return [a for a in accounts if a.get("enabled")]
+
+
+def _load_hashtags() -> list[dict[str, Any]]:
+    hashtags = _load_json(HASHTAGS_CONFIG, [])
+    return [h for h in hashtags if h.get("enabled")]
 
 
 # Кешуємо клієнта на весь час роботи процесу — instagrapi логінитись НЕ треба
@@ -110,6 +134,9 @@ DELAY_RANGE = [2, 6]
 # всередині одного акаунта — це вже DELAY_RANGE) — щоб не бити по API суцільним
 # потоком запитів навіть з урахуванням DELAY_RANGE.
 ACCOUNT_DELAY_RANGE = (5, 12)
+
+# Те саме між окремими хештегами.
+HASHTAG_DELAY_RANGE = (5, 12)
 
 
 def _build_client() -> Client | None:
@@ -200,7 +227,12 @@ def _media_photos(client: Client, media: Media) -> list[str]:
     return paths
 
 
-def _normalize_post(client: Client, media: Media, username: str) -> dict[str, Any]:
+def _normalize_post(
+    client: Client, media: Media, username: str, city: str, found_via_hashtag: str | None = None
+) -> dict[str, Any]:
+    raw_snapshot: dict[str, Any] = {"media_type": media.media_type, "pk": str(media.pk), "username": username}
+    if found_via_hashtag:
+        raw_snapshot["found_via_hashtag"] = found_via_hashtag
     return {
         "source": SOURCE_NAME,
         "url": f"https://www.instagram.com/p/{media.code}/",
@@ -224,11 +256,12 @@ def _normalize_post(client: Client, media: Media, username: str) -> dict[str, An
         "photos": _media_photos(client, media),
         "contact": None,
         "features": [],
-        "raw_snapshot": {"media_type": media.media_type, "pk": str(media.pk), "username": username},
+        "city": city,
+        "raw_snapshot": raw_snapshot,
     }
 
 
-def _normalize_story(client: Client, story: Story, username: str) -> dict[str, Any]:
+def _normalize_story(client: Client, story: Story, username: str, city: str) -> dict[str, Any]:
     photo = _download_media_item(client, story, f"story_{story.pk}")
     return {
         "source": SOURCE_NAME,
@@ -253,12 +286,33 @@ def _normalize_story(client: Client, story: Story, username: str) -> dict[str, A
         "photos": [photo] if photo else [],
         "contact": None,
         "features": [],
+        "city": city,
         "raw_snapshot": {"pk": str(story.pk), "username": username},
     }
 
 
-async def parse(accounts: list[str] | None = None) -> list[dict[str, Any]]:
-    """Забирає нові пости і поточні Stories кожного акаунта зі списку.
+def _search_hashtag(client: Client, tag: str, city: str) -> list[dict[str, Any]]:
+    """Останні пости/Reels за хештегом (client.hashtag_medias_recent охоплює
+    обидва — Reels в instagrapi це звичайний Media з media_type=2, окремого
+    ендпоінту для них немає)."""
+    listings: list[dict[str, Any]] = []
+    try:
+        medias = client.hashtag_medias_recent(tag, amount=HASHTAG_MEDIA_LIMIT)
+    except Exception:
+        logger.exception("Не вдалося обробити хештег #%s", tag)
+        return listings
+
+    for media in medias:
+        username = media.user.username if media.user else "unknown"
+        listings.append(_normalize_post(client, media, username, city, found_via_hashtag=tag))
+    logger.info("#%s (%s): перевірено %d постів", tag, city, len(medias))
+    return listings
+
+
+async def parse(accounts: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Забирає нові пости і поточні Stories кожного акаунта зі списку, а тоді —
+    останні пости/Reels за хештегами (instagram/hashtags.json), якщо це не
+    вимкнено окремо через INSTAGRAM_HASHTAG_SEARCH_ENABLED.
 
     instagrapi синхронний (не asyncio) — цей парсер має async-сигнатуру лише
     заради єдиного інтерфейсу з web_pages/lun.py та telegam/channels.py, а
@@ -287,40 +341,57 @@ async def parse(accounts: list[str] | None = None) -> list[dict[str, Any]]:
         return []
 
     accounts = accounts or _load_accounts()
-    if not accounts:
-        return []
-
-    state = _load_json(STATE_FILE, {})
     listings: list[dict[str, Any]] = []
 
-    for idx, username in enumerate(accounts):
-        if idx > 0:
-            await asyncio.sleep(random.uniform(*ACCOUNT_DELAY_RANGE))
-        try:
-            user_id = client.user_id_from_username(username)
-            last_pk = state.get(username)
+    if accounts:
+        state = _load_json(STATE_FILE, {})
 
-            medias = client.user_medias(user_id, amount=POSTS_PER_ACCOUNT)
-            for media in medias:
-                if last_pk and str(media.pk) == str(last_pk):
-                    break  # дійшли до вже обробленого поста — далі все старе
-                listings.append(_normalize_post(client, media, username))
-            if medias:
-                state[username] = str(medias[0].pk)  # найновіший — нова точка відліку
+        for idx, entry in enumerate(accounts):
+            username = entry["username"]
+            city = entry.get("city") or "ivano-frankivsk"
+            if idx > 0:
+                await asyncio.sleep(random.uniform(*ACCOUNT_DELAY_RANGE))
+            try:
+                user_id = client.user_id_from_username(username)
+                last_pk = state.get(username)
 
-            stories = client.user_stories(user_id)
-            for story in stories:
-                listings.append(_normalize_story(client, story, username))
+                medias = client.user_medias(user_id, amount=POSTS_PER_ACCOUNT)
+                for media in medias:
+                    if last_pk and str(media.pk) == str(last_pk):
+                        break  # дійшли до вже обробленого поста — далі все старе
+                    listings.append(_normalize_post(client, media, username, city))
+                if medias:
+                    state[username] = str(medias[0].pk)  # найновіший — нова точка відліку
 
-            logger.info("%s: перевірено %d постів, %d сторіз", username, len(medias), len(stories))
-        except LoginRequired:
-            logger.warning("Instagram: сесія протухла посеред роботи (%s) — скидаю кеш клієнта до наступного циклу", username)
-            _invalidate_client()
-            break
-        except Exception:
-            logger.exception("Не вдалося обробити акаунт %s", username)
+                stories = client.user_stories(user_id)
+                for story in stories:
+                    listings.append(_normalize_story(client, story, username, city))
 
-    _save_json(STATE_FILE, state)
+                logger.info("%s: перевірено %d постів, %d сторіз", username, len(medias), len(stories))
+            except LoginRequired:
+                logger.warning(
+                    "Instagram: сесія протухла посеред роботи (%s) — скидаю кеш клієнта до наступного циклу", username
+                )
+                _invalidate_client()
+                _save_json(STATE_FILE, state)
+                return listings
+            except Exception:
+                logger.exception("Не вдалося обробити акаунт %s", username)
+
+        _save_json(STATE_FILE, state)
+
+    if INSTAGRAM_HASHTAG_SEARCH_ENABLED:
+        hashtags = _load_hashtags()
+        for idx, entry in enumerate(hashtags):
+            if idx > 0 or accounts:
+                await asyncio.sleep(random.uniform(*HASHTAG_DELAY_RANGE))
+            try:
+                listings.extend(_search_hashtag(client, entry["tag"], entry.get("city") or "ivano-frankivsk"))
+            except LoginRequired:
+                logger.warning("Instagram: сесія протухла посеред хештег-пошуку — скидаю кеш клієнта до наступного циклу")
+                _invalidate_client()
+                break
+
     return listings
 
 

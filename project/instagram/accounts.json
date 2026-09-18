@@ -1,9 +1,9 @@
 [
-  {"username": "orenda_olimp", "enabled": true},
-  {"username": "iuriikovalik", "enabled": true},
-  {"username": "ivanmykytynskiy", "enabled": true},
-  {"username": "ksenia.kvartyry.if", "enabled": true},
-  {"username": "tan_dem_rial", "enabled": true},
-  {"username": "svitlana.boyko.luxor", "enabled": true},
-  {"username": "manhattanlux_if", "enabled": true}
+  {"username": "orenda_olimp", "enabled": true, "city": "ivano-frankivsk"},
+  {"username": "iuriikovalik", "enabled": true, "city": "ivano-frankivsk"},
+  {"username": "ivanmykytynskiy", "enabled": true, "city": "ivano-frankivsk"},
+  {"username": "ksenia.kvartyry.if", "enabled": true, "city": "ivano-frankivsk"},
+  {"username": "tan_dem_rial", "enabled": true, "city": "ivano-frankivsk"},
+  {"username": "svitlana.boyko.luxor", "enabled": true, "city": "ivano-frankivsk"},
+  {"username": "manhattanlux_if", "enabled": true, "city": "ivano-frankivsk"}
 ]

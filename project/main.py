@@ -129,9 +129,9 @@ async def run_all_parsers() -> tuple[list[dict], list[dict]]:
 
     try:
         ig_listings = await instagram_parser.parse()
-        # Акаунти в instagram/accounts.json теж усі про Івано-Франківськ.
+        # city вже виставлено в instagram/parser.py (кожен акаунт і кожен
+        # хештег у accounts.json/hashtags.json має своє місто).
         for listing in ig_listings:
-            listing["city"] = "ivano-frankivsk"
             listing["property_type"] = hard_filters.detect_property_type(listing)
         logger.info("instagram: знайдено %d оголошень", len(ig_listings))
         pipeline_log.source_result("instagram", found=len(ig_listings))

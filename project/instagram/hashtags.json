@@ -1,0 +1,23 @@
+[
+  {"tag": "орендаіванофранківськ", "city": "ivano-frankivsk", "enabled": true},
+  {"tag": "нерухомістьіванофранківськ", "city": "ivano-frankivsk", "enabled": true},
+  {"tag": "орендабудинку", "city": "ivano-frankivsk", "enabled": true},
+  {"tag": "будиноківанофранківськ", "city": "ivano-frankivsk", "enabled": true},
+  {"tag": "іванофранківськквартира", "city": "ivano-frankivsk", "enabled": true},
+  {"tag": "орендаквартириіванофранківськ", "city": "ivano-frankivsk", "enabled": true},
+  {"tag": "квартираіванофранківськ", "city": "ivano-frankivsk", "enabled": true},
+
+  {"tag": "орендакиїв", "city": "kyiv", "enabled": true},
+  {"tag": "орендаквартиркиїв", "city": "kyiv", "enabled": true},
+  {"tag": "нерухомістькиїв", "city": "kyiv", "enabled": true},
+  {"tag": "квартиракиїв", "city": "kyiv", "enabled": true},
+  {"tag": "орендабудинкукиїв", "city": "kyiv", "enabled": true},
+  {"tag": "київоренда", "city": "kyiv", "enabled": true},
+
+  {"tag": "орендачернівці", "city": "chernivtsi", "enabled": true},
+  {"tag": "орендаквартирчернівці", "city": "chernivtsi", "enabled": true},
+  {"tag": "нерухомістьчернівці", "city": "chernivtsi", "enabled": true},
+  {"tag": "квартиричернівці", "city": "chernivtsi", "enabled": true},
+  {"tag": "орендабудинкучернівці", "city": "chernivtsi", "enabled": true},
+  {"tag": "чернівціоренда", "city": "chernivtsi", "enabled": true}
+]

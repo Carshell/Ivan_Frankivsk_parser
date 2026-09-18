@@ -132,6 +132,17 @@
     "note": "Будинки, Чернівці."
   },
   {
+    "name": "lun_ua_chernivtsi_houses_filtered",
+    "enabled": true,
+    "module": "lun.py",
+    "base_url": "https://lun.ua",
+    "search_url": "https://lun.ua/rent/chernivtsi/houses?price_min=700&price_max=8000&currency=USD&room_count=3&room_count=4&room_count=5",
+    "parser_type": "playwright",
+    "city": "chernivtsi",
+    "property_type": "house",
+    "note": "Чернівці, будинки: 3-5 кімнат."
+  },
+  {
     "name": "dom_ria",
     "enabled": true,
     "module": "dom_ria.py",
@@ -209,6 +220,17 @@
     "note": "Чернівці, квартири з фільтром (ch=): поверх до 6, від $500, + 30 км."
   },
   {
+    "name": "dom_ria_chernivtsi_houses",
+    "enabled": true,
+    "module": "dom_ria.py",
+    "base_url": "https://dom.ria.com",
+    "search_url": "https://dom.ria.com/uk/search?excludeSold=1&category=4&realty_type=0&operation=3&state_id=25&in_radius=30&price_cur=1&wo_dupl=1&sort=inspected_sort&firstIteraction=false&city_ids=25&client=searchV2&limit=20&type=list&ch=235_f_700,235_t_0,246_243",
+    "parser_type": "playwright",
+    "city": "chernivtsi",
+    "property_type": "house",
+    "note": "Оренда будинків (realty_type=0), Чернівці + 30 км, від $700."
+  },
+  {
     "name": "olx",
     "enabled": true,
     "module": "olx.py",
@@ -273,6 +295,17 @@
     "city": "chernivtsi",
     "property_type": "apartment",
     "note": "Чернівці, квартири, без додаткових фільтрів. OLX не публікує координати — lat/lon завжди null."
+  },
+  {
+    "name": "olx_chernivtsi_houses",
+    "enabled": true,
+    "module": "olx.py",
+    "base_url": "https://www.olx.ua",
+    "search_url": "https://www.olx.ua/uk/nedvizhimost/doma/arenda-domov/chernovtsy/",
+    "parser_type": "playwright",
+    "city": "chernivtsi",
+    "property_type": "house",
+    "note": "Чернівці, будинки, без додаткових фільтрів. OLX не публікує координати — lat/lon завжди null."
   },
   {
     "name": "orenda_if_ua",
@@ -374,6 +407,17 @@
     "note": "Чернівці, квартири, без додаткових фільтрів. На відміну від Києва тут явний сегмент міста в шляху (chernovtsy) — надійніше за viewport-визначення."
   },
   {
+    "name": "rieltor_ua_chernivtsi_houses",
+    "enabled": true,
+    "module": "rieltor_ua.py",
+    "base_url": "https://rieltor.ua",
+    "search_url": "https://rieltor.ua/chernovtsy/houses-rent/%D0%9A%D0%B8%D1%97%D0%B2%D1%81%D1%8C%D0%BA%D0%B8%D0%B9-n15177/",
+    "parser_type": "playwright",
+    "city": "chernivtsi",
+    "property_type": "house",
+    "note": "Чернівці, будинки — URL звужений на конкретний район (Київський, n15177), а не все місто. Якщо це небажано, скажи — заміню на URL без районного фільтра."
+  },
+  {
     "name": "flatfy",
     "enabled": true,
     "module": "flatfy.py",
@@ -451,6 +495,17 @@
     "note": "Чернівці, квартири, без додаткових фільтрів (категорійна сторінка)."
   },
   {
+    "name": "flatfy_chernivtsi_houses",
+    "enabled": true,
+    "module": "flatfy.py",
+    "base_url": "https://flatfy.ua",
+    "search_url": "https://flatfy.ua/uk/%D0%BE%D1%80%D0%B5%D0%BD%D0%B4%D0%B0-%D0%B1%D1%83%D0%B4%D0%B8%D0%BD%D0%BA%D1%96%D0%B2-%D1%87%D0%B5%D1%80%D0%BD%D1%96%D0%B2%D1%86%D1%96",
+    "parser_type": "playwright",
+    "city": "chernivtsi",
+    "property_type": "house",
+    "note": "Чернівці, будинки, без додаткових фільтрів (категорійна сторінка)."
+  },
+  {
     "name": "m2bomber",
     "enabled": true,
     "module": "m2bomber.py",
@@ -504,5 +559,16 @@
     "city": "chernivtsi",
     "property_type": "apartment",
     "note": "Чернівці, квартири (flat-rent), без додаткових фільтрів."
+  },
+  {
+    "name": "m2bomber_chernivtsi_houses",
+    "enabled": true,
+    "module": "m2bomber.py",
+    "base_url": "https://ua.m2bomber.com",
+    "search_url": "https://ua.m2bomber.com/house-rent/cernivci-3-1742393",
+    "parser_type": "playwright",
+    "city": "chernivtsi",
+    "property_type": "house",
+    "note": "Чернівці, будинки (house-rent), без додаткових фільтрів. Прибрано ?page=3 з наданого URL — пагінацію парсер веде сам."
   }
 ]

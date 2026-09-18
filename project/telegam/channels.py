@@ -2,9 +2,11 @@
 
 На відміну від web_pages/lun.py тут немає структурованих даних (JSON-LD/API) —
 лише вільний текст повідомлення, тому price/rooms/area витягуються евристично
-регулярками і не завжди присутні. Пости без розпізнаної ціни або явно не про
-будинок/котедж відсіюються тут же (це і є "хард-фільтр до Claude" з п.3 ТЗ
-для цього джерела — на класифайдах типу lun.ua ту саму роль виконує URL-фільтр).
+регулярками і не завжди присутні. Пости без розпізнаної ціни або про добову
+оренду відсіюються тут же. Тип нерухомості (будинок/квартира) НЕ фільтрується
+на цьому рівні — обидва типи тепер підтримуються (вибір підписника, п.
+hard_filters.matches_subscriber_preferences); класифікація тексту робиться
+пізніше, в main.py, через hard_filters.detect_property_type().
 
 Перед першим запуском потрібен один інтерактивний вхід — див. login_telegram.py.
 """
@@ -42,9 +44,6 @@ PRICE_UAH_RE = re.compile(r"(\d[\d\s]{3,7})\s*(?:грн|уах|uah)", re.IGNOREC
 ROOMS_RE = re.compile(r"(\d+)[\s-]*(?:кімн|к\.|км)", re.IGNORECASE)
 AREA_RE = re.compile(r"(\d{2,4}(?:[.,]\d+)?)\s*(?:м²|кв\.?\s*м|m2|м2)", re.IGNORECASE)
 
-HOUSE_KEYWORDS = ("будинок", "будинку", "будинка", "будиночок", "будинки", "котедж", "котеджу", "таунхаус", "хата")
-APARTMENT_KEYWORDS = ("квартир",)  # квартира/квартири/квартирою — якщо є в заголовку, це не будинок,
-# навіть якщо десь у тексті трапляється "будинок" як опис забудови ("квартира в приватному будинку")
 EXCLUDE_KEYWORDS = ("подобово", "почасово", "погодинно")  # добова оренда — не наш профіль
 
 
@@ -85,18 +84,9 @@ def _parse_price(text: str) -> tuple[float | None, float | None]:
     return price_usd, price_uah
 
 
-def _looks_like_house(text: str) -> bool:
+def _is_daily_rental(text: str) -> bool:
     lowered = text.lower()
-    if any(word in lowered for word in EXCLUDE_KEYWORDS):
-        return False
-    # Заголовок (перший рядок) майже завжди прямо називає тип нерухомості
-    # ("Здається квартира...", "ОРЕНДА будинку..."). Довіряємо саме йому:
-    # "будинок" десь у тілі тексту зазвичай означає лише тип забудови
-    # ("квартира в приватному будинку"), а не сам об'єкт оренди.
-    title_line = lowered.splitlines()[0] if lowered else ""
-    if any(word in title_line for word in APARTMENT_KEYWORDS):
-        return False
-    return any(word in lowered for word in HOUSE_KEYWORDS)
+    return any(word in lowered for word in EXCLUDE_KEYWORDS)
 
 
 async def _fetch_channel_messages(client: TelegramClient, username: str, last_id: int) -> list[Message]:
@@ -132,7 +122,7 @@ async def _normalize_group(
         if m.message:
             text = m.message
             break
-    if not text or not _looks_like_house(text):
+    if not text or _is_daily_rental(text):
         return None
 
     price_usd, price_uah = _parse_price(text)

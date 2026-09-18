@@ -24,7 +24,9 @@ from aiogram.types import (
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputMediaPhoto,
+    KeyboardButton,
     Message,
+    ReplyKeyboardMarkup,
 )
 from dotenv import load_dotenv
 
@@ -62,6 +64,17 @@ PROPERTY_TYPE_OPTIONS: list[tuple[str, str]] = [
     ("apartment", "Квартири"),
     ("house", "Дома"),
 ]
+
+# Постійна клавіатура-меню (кнопки під полем вводу, не inline) — щоб відкрити
+# майстер зміни міст/типу нерухомості можна було одним тапом, а не пам'ятати
+# команду /preferences. Прикріплюється до привітальних повідомлень (cmd_start,
+# cmd_preferences) і лишається в чаті, поки Telegram-клієнт не отримає інший
+# reply-keyboard або ReplyKeyboardRemove.
+PREFERENCES_BUTTON_TEXT = "⚙️ Міста і тип нерухомості"
+MAIN_MENU_KEYBOARD = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text=PREFERENCES_BUTTON_TEXT)]],
+    resize_keyboard=True,
+)
 
 _T = TypeVar("_T")
 
@@ -428,7 +441,8 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
     if not storage.has_preferences(message.chat.id):
         await message.answer(
             "Вітаю! Це бот моніторингу оренди нерухомості.\n\n"
-            "Спершу оберемо, що саме тобі показувати — це займе два кроки."
+            "Спершу оберемо, що саме тобі показувати — це займе два кроки.",
+            reply_markup=MAIN_MENU_KEYBOARD,
         )
         await _start_onboarding(message, state)
         return
@@ -439,9 +453,10 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
         "/pause — призупинити розсилку\n"
         "/resume — відновити розсилку\n"
         "/filters — активні джерела\n"
-        "/preferences — змінити вибір міст і типу нерухомості\n\n"
+        f"«{PREFERENCES_BUTTON_TEXT}» (кнопка знизу) або /preferences — змінити вибір міст і типу нерухомості\n\n"
         "Кожне оголошення проходить хард-фільтр (продаж/ціна) і скоринг "
-        "Claude за профілем замовника — зі скорингом та блоком безпеки."
+        "Claude за профілем замовника — зі скорингом та блоком безпеки.",
+        reply_markup=MAIN_MENU_KEYBOARD,
     )
 
     prefs = storage.get_preferences(message.chat.id)
@@ -449,8 +464,9 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 
 
 @router.message(Command("preferences"))
+@router.message(F.text == PREFERENCES_BUTTON_TEXT)
 async def cmd_preferences(message: Message, state: FSMContext) -> None:
-    await message.answer("Обираємо заново.")
+    await message.answer("Обираємо заново.", reply_markup=MAIN_MENU_KEYBOARD)
     await _start_onboarding(message, state)
 
 

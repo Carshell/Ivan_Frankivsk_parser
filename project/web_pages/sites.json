@@ -88,6 +88,17 @@
     "note": "Будинки, Київ."
   },
   {
+    "name": "lun_ua_kyiv_houses_filtered",
+    "enabled": true,
+    "module": "lun.py",
+    "base_url": "https://lun.ua",
+    "search_url": "https://lun.ua/rent/kyiv/houses?geoDistance=10009580%3A60000&price_min=700&price_max=39500&currency=USD&room_count=3&room_count=4&room_count=5",
+    "parser_type": "playwright",
+    "city": "kyiv",
+    "property_type": "house",
+    "note": "Київ, будинки: 3-5 кімнат, у радіусі 60 км від центру."
+  },
+  {
     "name": "lun_ua_chernivtsi_flats",
     "enabled": true,
     "module": "lun.py",
@@ -165,6 +176,17 @@
     "note": "Київ, квартири з фільтром (ch=): поверх до 6, + 20 км."
   },
   {
+    "name": "dom_ria_kyiv_houses",
+    "enabled": true,
+    "module": "dom_ria.py",
+    "base_url": "https://dom.ria.com",
+    "search_url": "https://dom.ria.com/uk/search?excludeSold=1&category=4&realty_type=0&operation=3&state_id=10&in_radius=30&price_cur=1&wo_dupl=1&sort=inspected_sort&firstIteraction=false&city_ids=10&client=searchV2&limit=20&type=list&ch=235_f_700,235_t_0,246_243",
+    "parser_type": "playwright",
+    "city": "kyiv",
+    "property_type": "house",
+    "note": "Оренда будинків (realty_type=0), Київ + 30 км, від $700."
+  },
+  {
     "name": "olx",
     "enabled": true,
     "module": "olx.py",
@@ -207,6 +229,17 @@
     "city": "kyiv",
     "property_type": "apartment",
     "note": "Київ, квартири: поверх до 6, площа від 60 м²."
+  },
+  {
+    "name": "olx_kyiv_houses",
+    "enabled": true,
+    "module": "olx.py",
+    "base_url": "https://www.olx.ua",
+    "search_url": "https://www.olx.ua/uk/nedvizhimost/doma/arenda-domov/kiev/?currency=UAH&search%5Bfilter_float_total_area:to%5D=350",
+    "parser_type": "playwright",
+    "city": "kyiv",
+    "property_type": "house",
+    "note": "Київ, будинки: площа до 350 м². OLX не публікує координати — lat/lon завжди null."
   },
   {
     "name": "orenda_if_ua",
@@ -275,6 +308,28 @@
     "note": "Київ, квартири: площа від 50 м², енергонезалежність, поверх до 6, радіус 20 км від центру."
   },
   {
+    "name": "rieltor_ua_kyiv_houses",
+    "enabled": true,
+    "module": "rieltor_ua.py",
+    "base_url": "https://rieltor.ua",
+    "search_url": "https://rieltor.ua/houses-rent/?currency=2&price_min=700&price_max=5000&radius=50&sort=-default#8.49/50.4636/30.416",
+    "parser_type": "playwright",
+    "city": "kyiv",
+    "property_type": "house",
+    "note": "Київ, будинки, без додаткових фільтрів (місто — з #fragment карти, як і rieltor_ua_kyiv_apartments)."
+  },
+  {
+    "name": "rieltor_ua_kyiv_houses_autonomy",
+    "enabled": true,
+    "module": "rieltor_ua.py",
+    "base_url": "https://rieltor.ua",
+    "search_url": "https://rieltor.ua/houses-rent/?currency=2&price_min=700&price_max=5000&radius=50&sort=-default&autonomy_power=1#8.6/50.4342/30.404",
+    "parser_type": "playwright",
+    "city": "kyiv",
+    "property_type": "house",
+    "note": "Київ, будинки: енергонезалежність."
+  },
+  {
     "name": "flatfy",
     "enabled": true,
     "module": "flatfy.py",
@@ -330,6 +385,17 @@
     "note": "Київ, квартири (section_id=2): 3-5 кімнат, від 60 м², поверх до 6, енергонезалежність."
   },
   {
+    "name": "flatfy_kyiv_houses",
+    "enabled": true,
+    "module": "flatfy.py",
+    "base_url": "https://flatfy.ua",
+    "search_url": "https://flatfy.ua/uk/search?autonomy_power=true&currency=USD&geo_id=10009580&has_eoselia=false&is_without_fee=false&land_area_max=400&price_min=700&price_sqm_currency=USD&room_count=5&room_count=4&section_id=4&sort=relevance",
+    "parser_type": "playwright",
+    "city": "kyiv",
+    "property_type": "house",
+    "note": "Київ, будинки (section_id=4): 4-5 кімнат, land_area_max=400 (одиниця не перевірена — сотки чи м²), енергонезалежність."
+  },
+  {
     "name": "m2bomber",
     "enabled": true,
     "module": "m2bomber.py",
@@ -361,5 +427,16 @@
     "city": "kyiv",
     "property_type": "apartment",
     "note": "Київ, квартири (flat-rent): 3-7 кімнат, від 60 м², від $700."
+  },
+  {
+    "name": "m2bomber_kyiv_houses",
+    "enabled": true,
+    "module": "m2bomber.py",
+    "base_url": "https://ua.m2bomber.com",
+    "search_url": "https://ua.m2bomber.com/search?address=%D0%9A%D0%B8%D1%97%D0%B2&type=house-rent&osmId=421866&bn=&rooms=&area=%D0%B2%D1%96%D0%B4+200&price=%D0%B2%D1%96%D0%B4+%24700&pricePerM2=false&year=&text=&photo=false&owner=false",
+    "parser_type": "playwright",
+    "city": "kyiv",
+    "property_type": "house",
+    "note": "Київ, будинки (house-rent): від 200 м², від $700."
   }
 ]

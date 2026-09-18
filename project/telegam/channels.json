@@ -1,7 +1,13 @@
 [
-  {"username": "RENTIN_FRANKIVSK", "enabled": true, "note": "канал"},
-  {"username": "kvartiri_budinku", "enabled": true, "note": "канал"},
-  {"username": "rent_frankivsk", "enabled": true, "note": "канал"},
-  {"username": "orendaif", "enabled": true, "note": "канал"},
-  {"username": "ivano_frankivsk_dom", "enabled": true, "note": "група"}
+  {"username": "RENTIN_FRANKIVSK", "enabled": true, "city": "ivano-frankivsk", "note": "канал"},
+  {"username": "kvartiri_budinku", "enabled": true, "city": "ivano-frankivsk", "note": "канал"},
+  {"username": "rent_frankivsk", "enabled": true, "city": "ivano-frankivsk", "note": "канал"},
+  {"username": "orendaif", "enabled": true, "city": "ivano-frankivsk", "note": "канал"},
+  {"username": "ivano_frankivsk_dom", "enabled": true, "city": "ivano-frankivsk", "note": "група"},
+  {"username": "arenda_kvartiry_kiev", "enabled": true, "city": "kyiv", "note": "канал"},
+  {"username": "kvarturant", "enabled": true, "city": "kyiv", "note": "канал"},
+  {"username": "arenda_kieve", "enabled": true, "city": "kyiv", "note": "канал"},
+  {"username": "orenda_kvatir", "enabled": true, "city": "kyiv", "note": "канал"},
+  {"username": "che_rent", "enabled": true, "city": "chernivtsi", "note": "канал"},
+  {"username": "rentCV", "enabled": true, "city": "chernivtsi", "note": "канал"}
 ]

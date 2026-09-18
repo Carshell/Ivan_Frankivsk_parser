@@ -60,9 +60,9 @@ def _save_json(path: Path, data) -> None:
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
 
-def _load_channels() -> list[str]:
+def _load_channels() -> list[dict[str, Any]]:
     channels = _load_json(CHANNELS_CONFIG, [])
-    return [c["username"] for c in channels if c.get("enabled")]
+    return [c for c in channels if c.get("enabled")]
 
 
 def _parse_price(text: str) -> tuple[float | None, float | None]:
@@ -115,7 +115,7 @@ def _group_by_album(messages: list[Message]) -> list[list[Message]]:
 
 
 async def _normalize_group(
-    client: TelegramClient, group: list[Message], channel_username: str
+    client: TelegramClient, group: list[Message], channel_username: str, city: str
 ) -> dict[str, Any] | None:
     text = ""
     for m in group:
@@ -167,12 +167,19 @@ async def _normalize_group(
         "photos": photos,
         "contact": None,
         "features": [],
+        "city": city,
         "raw_snapshot": {"text": text, "channel": channel_username, "message_ids": [m.id for m in group]},
     }
 
 
-async def parse(channels: list[str] | None = None) -> list[dict[str, Any]]:
-    """Забирає нові повідомлення (від останнього обробленого message_id) з кожного каналу/групи."""
+async def parse(channels: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Забирає нові повідомлення (від останнього обробленого message_id) з кожного каналу/групи.
+
+    Кожен канал у channels.json має власне "city" (канали для Києва/Чернівців
+    додались пізніше, поруч із початковими івано-франківськими) — тегується
+    прямо тут, на відміну від property_type, який усе ще визначається
+    евристикою пізніше в main.py (текст каналів надто вільний, щоб надійно
+    прив'язати тип нерухомості до конкретного каналу заздалегідь)."""
     if not API_ID or not API_HASH:
         logger.warning("TELEGRAM_API_ID / TELEGRAM_API_HASH не задані в .env — пропускаю telegram-парсер")
         return []
@@ -193,14 +200,16 @@ async def parse(channels: list[str] | None = None) -> list[dict[str, Any]]:
     client = TelegramClient(str(SESSION_PATH), API_ID, API_HASH)
     await client.start()
     try:
-        for username in channels:
+        for entry in channels:
+            username = entry["username"]
+            city = entry.get("city") or "ivano-frankivsk"
             try:
                 last_id = state.get(username, 0)
                 messages = await _fetch_channel_messages(client, username, last_id)
                 if messages:
                     state[username] = max(m.id for m in messages)
                 for group in _group_by_album(messages):
-                    listing = await _normalize_group(client, group, username)
+                    listing = await _normalize_group(client, group, username, city)
                     if listing:
                         listings.append(listing)
                 logger.info("%s: перевірено %d повідомлень", username, len(messages))

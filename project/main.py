@@ -112,11 +112,11 @@ async def run_all_parsers() -> tuple[list[dict], list[dict]]:
 
     try:
         tg_listings = await telegram_channels.parse()
-        # Канали в telegam/channels.json налаштовані виключно на Івано-Франківськ —
-        # тип нерухомості тут вільний текст, тегуємо евристикою (None -> підходить
-        # під будь-який вибір підписника, а не ховається через невизначеність).
+        # city вже виставлено в channels.py (кожен канал у channels.json має
+        # своє місто); тип нерухомості тут вільний текст, тегуємо евристикою
+        # (None -> підходить під будь-який вибір підписника, а не ховається
+        # через невизначеність).
         for listing in tg_listings:
-            listing["city"] = "ivano-frankivsk"
             listing["property_type"] = hard_filters.detect_property_type(listing)
         logger.info("telegram-канали: знайдено %d оголошень", len(tg_listings))
         pipeline_log.source_result("telegram", found=len(tg_listings))

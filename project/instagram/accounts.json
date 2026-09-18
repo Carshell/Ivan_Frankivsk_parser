@@ -5,5 +5,19 @@
   {"username": "ksenia.kvartyry.if", "enabled": true, "city": "ivano-frankivsk"},
   {"username": "tan_dem_rial", "enabled": true, "city": "ivano-frankivsk"},
   {"username": "svitlana.boyko.luxor", "enabled": true, "city": "ivano-frankivsk"},
-  {"username": "manhattanlux_if", "enabled": true, "city": "ivano-frankivsk"}
+  {"username": "manhattanlux_if", "enabled": true, "city": "ivano-frankivsk"},
+  {"username": "kvartyry_pidselennya_if", "enabled": true, "city": "ivano-frankivsk"},
+  {"username": "aksioma_if", "enabled": true, "city": "ivano-frankivsk"},
+  {"username": "orenda_if____", "enabled": true, "city": "ivano-frankivsk"},
+
+  {"username": "kyiv.realtor", "enabled": true, "city": "kyiv"},
+  {"username": "best_realty_kiev", "enabled": true, "city": "kyiv"},
+  {"username": "realestate.kiev", "enabled": true, "city": "kyiv"},
+  {"username": "rieltor.kiev.ua", "enabled": true, "city": "kyiv"},
+  {"username": "imperial_an_kiev", "enabled": true, "city": "kyiv"},
+  {"username": "blagovist", "enabled": true, "city": "kyiv"},
+  {"username": "avangard.kyiv", "enabled": true, "city": "kyiv"},
+
+  {"username": "rieltor.chernivtsi.rentcv", "enabled": true, "city": "chernivtsi"},
+  {"username": "centralne.in.ua", "enabled": true, "city": "chernivtsi"}
 ]

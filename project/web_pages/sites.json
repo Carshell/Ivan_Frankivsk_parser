@@ -309,14 +309,14 @@
   },
   {
     "name": "orenda_if_ua",
-    "enabled": false,
+    "enabled": true,
     "module": "orenda_if_ua.py",
     "base_url": "https://www.orenda.if.ua",
-    "search_url": "https://www.orenda.if.ua/",
-    "parser_type": null,
+    "search_url": "https://www.orenda.if.ua/all-properties?sort=newest&currency=uah",
+    "parser_type": "playwright",
     "city": "ivano-frankivsk",
     "property_type": null,
-    "note": "Не реалізовано. Локальний сайт, структура ще не досліджена."
+    "note": "Локальне агентство RITM.home. /all-properties/ вже містить усі райони впереміш (Центр, Пасічна, Передмістя тощо) — окремого проходу по районах не треба. property_type=null навмисно: сайт сам явно пише «Кімнат: будинок» для будинків — parse() виставляє тип на кожне оголошення індивідуально, main.py це не перезаписує."
   },
   {
     "name": "rieltor_ua",

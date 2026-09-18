@@ -68,7 +68,12 @@ async def _run_site_parser(site: dict, semaphore: asyncio.Semaphore) -> tuple[li
     з тексту) — це надійно, бо кожен під-пошук у sites.json вже фільтрує по
     URL/query саме те місто й тип, на відміну від вільного тексту
     Telegram-каналів чи Instagram (там тип визначається евристикою, див.
-    hard_filters.detect_property_type, а місто завжди ivano-frankivsk)."""
+    hard_filters.detect_property_type, а місто завжди ivano-frankivsk).
+
+    Виняток — джерела зі змішаним типом на одній сторінці (orenda_if_ua: і
+    квартири, і будинки разом): їхній property_type у sites.json навмисно
+    null, а сам парсер виставляє тип на кожне оголошення індивідуально
+    (надійніший сигнал від самого сайту) — тут це НЕ перезаписується."""
     module_name = Path(site["module"]).stem
     async with semaphore:
         try:
@@ -76,7 +81,8 @@ async def _run_site_parser(site: dict, semaphore: asyncio.Semaphore) -> tuple[li
             listings = await module.parse(search_url=site["search_url"])
             for listing in listings:
                 listing["city"] = site.get("city")
-                listing["property_type"] = site.get("property_type")
+                if site.get("property_type"):
+                    listing["property_type"] = site["property_type"]
             logger.info("%s: знайдено %d оголошень", site["name"], len(listings))
             pipeline_log.source_result(site["name"], found=len(listings))
             return listings, {"name": site["name"], "found": len(listings), "error": None}

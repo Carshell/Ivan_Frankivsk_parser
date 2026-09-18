@@ -66,6 +66,17 @@
     "note": "Квартири, Київ."
   },
   {
+    "name": "lun_ua_kyiv_flats_filtered",
+    "enabled": true,
+    "module": "lun.py",
+    "base_url": "https://lun.ua",
+    "search_url": "https://lun.ua/rent/kyiv/flats?price_min=800&price_max=7000&currency=USD&autonomy_power=true&area_min=65&room_count=4&room_count=5&room_count=3&shelter=underground_parking&shelter=basement&shelter=special&floor_max=6",
+    "parser_type": "playwright",
+    "city": "kyiv",
+    "property_type": "apartment",
+    "note": "Київ, квартири: 3-5 кімнат, від 65 м², укриття, енергонезалежність, поверх до 6."
+  },
+  {
     "name": "lun_ua_kyiv_houses",
     "enabled": true,
     "module": "lun.py",
@@ -132,6 +143,28 @@
     "note": "Оренда квартир з фільтром (ch=): кімнати від 3, площа від 70 м², поверх до 6."
   },
   {
+    "name": "dom_ria_kyiv_apartments",
+    "enabled": true,
+    "module": "dom_ria.py",
+    "base_url": "https://dom.ria.com",
+    "search_url": "https://dom.ria.com/uk/arenda-kvartir/kiev/",
+    "parser_type": "playwright",
+    "city": "kyiv",
+    "property_type": "apartment",
+    "note": "Оренда квартир, Київ, без додаткових фільтрів (категорійна сторінка)."
+  },
+  {
+    "name": "dom_ria_kyiv_apartments_filtered",
+    "enabled": true,
+    "module": "dom_ria.py",
+    "base_url": "https://dom.ria.com",
+    "search_url": "https://dom.ria.com/uk/search?excludeSold=1&category=1&realty_type=2&operation=3&state_id=10&in_radius=20&price_cur=1&wo_dupl=1&sort=inspected_sort&firstIteraction=false&city_ids=10&client=searchV2&limit=20&type=list&ch=227_t_6,246_244,2073_2073",
+    "parser_type": "playwright",
+    "city": "kyiv",
+    "property_type": "apartment",
+    "note": "Київ, квартири з фільтром (ch=): поверх до 6, + 20 км."
+  },
+  {
     "name": "olx",
     "enabled": true,
     "module": "olx.py",
@@ -152,6 +185,28 @@
     "city": "ivano-frankivsk",
     "property_type": "apartment",
     "note": "Оренда квартир: 3-5 кімнат, площа від 60 м², поверх до 6, будинок до 7 поверхів. OLX не публікує координати — lat/lon завжди null."
+  },
+  {
+    "name": "olx_kyiv_apartments",
+    "enabled": true,
+    "module": "olx.py",
+    "base_url": "https://www.olx.ua",
+    "search_url": "https://www.olx.ua/uk/nedvizhimost/kvartiry/dolgosrochnaya-arenda-kvartir/kiev/",
+    "parser_type": "playwright",
+    "city": "kyiv",
+    "property_type": "apartment",
+    "note": "Київ, квартири, без додаткових фільтрів. OLX не публікує координати — lat/lon завжди null."
+  },
+  {
+    "name": "olx_kyiv_apartments_filtered",
+    "enabled": true,
+    "module": "olx.py",
+    "base_url": "https://www.olx.ua",
+    "search_url": "https://www.olx.ua/uk/nedvizhimost/kvartiry/dolgosrochnaya-arenda-kvartir/kiev/?currency=UAH&search%5Bfilter_float_floor:to%5D=6&search%5Bfilter_float_total_area:from%5D=60",
+    "parser_type": "playwright",
+    "city": "kyiv",
+    "property_type": "apartment",
+    "note": "Київ, квартири: поверх до 6, площа від 60 м²."
   },
   {
     "name": "orenda_if_ua",
@@ -198,6 +253,28 @@
     "note": "Квартири: 3-6 кімнат, площа від 70 м², поверх 1-6, енергонезалежність, радіус 10 км."
   },
   {
+    "name": "rieltor_ua_kyiv_apartments",
+    "enabled": true,
+    "module": "rieltor_ua.py",
+    "base_url": "https://rieltor.ua",
+    "search_url": "https://rieltor.ua/flats-rent/#9.74/50.4694/30.5186",
+    "parser_type": "playwright",
+    "city": "kyiv",
+    "property_type": "apartment",
+    "note": "Київ, квартири, без додаткових фільтрів. На відміну від IF-джерел тут немає сегмента міста в шляху — місто визначається viewport-координатами в #fragment (карта); якщо колись зміниться поведінка сайту, це джерело може почати повертати нецільові міста."
+  },
+  {
+    "name": "rieltor_ua_kyiv_apartments_filtered",
+    "enabled": true,
+    "module": "rieltor_ua.py",
+    "base_url": "https://rieltor.ua",
+    "search_url": "https://rieltor.ua/flats-rent/?radius=20&sort=-default&common_area_min=50&autonomy_power=1&floor_max=6#10.26/50.4674/30.5094",
+    "parser_type": "playwright",
+    "city": "kyiv",
+    "property_type": "apartment",
+    "note": "Київ, квартири: площа від 50 м², енергонезалежність, поверх до 6, радіус 20 км від центру."
+  },
+  {
     "name": "flatfy",
     "enabled": true,
     "module": "flatfy.py",
@@ -231,6 +308,28 @@
     "note": "Квартири (section_id=2): 3-5 кімнат, від 60 м², поверх до 6 (без вимоги енергонезалежності/року будівництва)."
   },
   {
+    "name": "flatfy_kyiv_apartments",
+    "enabled": true,
+    "module": "flatfy.py",
+    "base_url": "https://flatfy.ua",
+    "search_url": "https://flatfy.ua/uk/search?area_min=60&currency=USD&geo_id=10009580&has_eoselia=false&is_without_fee=false&price_min=700&price_sqm_currency=USD&room_count=3&room_count=4&room_count=5&section_id=2&sort=relevance",
+    "parser_type": "playwright",
+    "city": "kyiv",
+    "property_type": "apartment",
+    "note": "Київ, квартири (section_id=2): 3-5 кімнат, від 60 м²."
+  },
+  {
+    "name": "flatfy_kyiv_apartments_autonomy",
+    "enabled": true,
+    "module": "flatfy.py",
+    "base_url": "https://flatfy.ua",
+    "search_url": "https://flatfy.ua/uk/search?area_min=60&autonomy_power=true&currency=USD&floor_max=6&geo_id=10009580&has_eoselia=false&is_without_fee=false&price_min=700&price_sqm_currency=USD&room_count=3&room_count=4&room_count=5&section_id=2&sort=relevance",
+    "parser_type": "playwright",
+    "city": "kyiv",
+    "property_type": "apartment",
+    "note": "Київ, квартири (section_id=2): 3-5 кімнат, від 60 м², поверх до 6, енергонезалежність."
+  },
+  {
     "name": "m2bomber",
     "enabled": true,
     "module": "m2bomber.py",
@@ -251,5 +350,16 @@
     "city": "ivano-frankivsk",
     "property_type": "apartment",
     "note": "Квартири (flat-rent): 3-10 кімнат, площа 50-100 м², від $700."
+  },
+  {
+    "name": "m2bomber_kyiv_apartments",
+    "enabled": true,
+    "module": "m2bomber.py",
+    "base_url": "https://ua.m2bomber.com",
+    "search_url": "https://ua.m2bomber.com/search?address=%D0%9A%D0%B8%D1%97%D0%B2&type=flat-rent&osmId=421866&bn=&rooms=3-7&area=%D0%B2%D1%96%D0%B4+60&price=%D0%B2%D1%96%D0%B4+%24700&pricePerM2=false&year=&text=&photo=false&owner=false",
+    "parser_type": "playwright",
+    "city": "kyiv",
+    "property_type": "apartment",
+    "note": "Київ, квартири (flat-rent): 3-7 кімнат, від 60 м², від $700."
   }
 ]

@@ -49,6 +49,9 @@ SCORE_THRESHOLD = 50  # нижче — в архів, у Telegram не йде (�
 # RAM сервера. Підбирай під реальні ресурси сервера через .env, без правки коду.
 MAX_CONCURRENT_SITE_PARSERS = int(os.environ.get("MAX_CONCURRENT_SITE_PARSERS", "3"))
 
+# Скільки оголошень оцінювати Claude одночасно (а не по одному).
+CLAUDE_CONCURRENCY = int(os.environ.get("CLAUDE_CONCURRENCY", "5"))
+
 # Тимчасово (за проханням користувача): усе нове йде в бот без відсіву —
 # Claude лише додає короткий аналіз/скоринг/безпеку до повідомлення, але
 # нічого не відкидає. Поставити назад True, щоб повернути п.3/п.7 ТЗ.
@@ -168,6 +171,7 @@ async def score_new_listings(listings: list[dict]) -> tuple[list[dict], dict]:
     claude_unavailable = 0
     below_threshold = 0
 
+    candidates: list[dict] = []
     for listing in listings:
         # Завжди, незалежно від ENABLE_HARD_FILTERS — замовника продаж не
         # цікавить в принципі, це не той самий "тимчасово вимкнений" фільтр.
@@ -177,9 +181,21 @@ async def score_new_listings(listings: list[dict]) -> tuple[list[dict], dict]:
         if ENABLE_HARD_FILTERS and not hard_filters.passes_hard_filters(listing):
             continue
         hard_passed += 1
+        candidates.append(listing)
 
+    # Виклик Claude займає ~10 с; послідовно сотні оголошень (особливо на
+    # першому запуску) оброблялись би годинами. Паралелимо з обмеженням
+    # (CLAUDE_CONCURRENCY), щоб не впертись у rate limit API.
+    semaphore = asyncio.Semaphore(CLAUDE_CONCURRENCY)
+
+    async def _score(listing: dict) -> dict | None:
         objects = security_reference.nearby_objects(listing.get("lat"), listing.get("lon"))
-        claude_result = await claude_scoring.score_listing(listing, objects)
+        async with semaphore:
+            return await claude_scoring.score_listing(listing, objects)
+
+    claude_results = await asyncio.gather(*(_score(listing) for listing in candidates))
+
+    for listing, claude_result in zip(candidates, claude_results):
         listing["claude"] = claude_result
 
         if claude_result is None:

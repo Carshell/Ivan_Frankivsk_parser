@@ -1,10 +1,13 @@
 """Головний вхідний файл: піднімає Telegram-бота і цикл парсингу джерел.
 
-Сам код парсингу/бота лежить у модулях (web_pages/*.py, telegam/bot.py) —
-цей файл лише викликає їхні функції та зв'язує їх докупи:
-  1. читає web_pages/sites.json і викликає parse() кожного увімкненого парсера;
-  2. нові (ще не надіслані) оголошення розсилає підписникам через telegam/bot.py;
-  3. піднімає polling Telegram-бота (команди /start, /digest, /pause, /resume, /filters).
+Сам код парсингу/бота лежить у модулях (web_pages/*.py, telegam/*.py,
+instagram/parser.py) — цей файл зв'язує їх докупи:
+  1. читає web_pages/sites.json, Telegram-канали й Instagram, збирає оголошення;
+  2. нові оголошення: відсів продажу -> дедуплікація -> витяг полів через Claude
+     (район, тварини, меблі…) -> збереження в базу (rentdb); відомі — оновлюють
+     "востаннє бачили", і відстежується зниження ціни;
+  3. підписникам зі збереженими фільтрами шле сповіщення про НОВІ об'єкти;
+  4. піднімає polling Telegram-бота (діалог пошуку на кнопках, telegam/bot.py).
 
 Запуск (Linux/Windows, з папки project/):
     pip install -r requirements.txt
@@ -20,43 +23,38 @@ import importlib
 import json
 import logging
 import os
-import secrets
 from pathlib import Path
+from typing import Any
 
 from aiogram import Bot, Dispatcher
 from dotenv import load_dotenv
 
-import claude_scoring
+import claude_extract
+import currency
 import dedup
 import hard_filters
 import pipeline_log
-import security_reference
+import rentdb
 from instagram import parser as instagram_parser
 from telegam import channels as telegram_channels
-from telegam import storage
-from telegam.bot import router, send_listing
+from telegam import notify
+from telegam.bot import router, setup_commands
 
 logger = logging.getLogger(__name__)
 
 BASE_DIR = Path(__file__).parent
 SITES_CONFIG = BASE_DIR / "web_pages" / "sites.json"
-PARSE_INTERVAL_SECONDS = 30 * 60  # класифайди — раз на 30 хв (ТЗ, п.7)
-SCORE_THRESHOLD = 50  # нижче — в архів, у Telegram не йде (ТЗ, п.7)
+PARSE_INTERVAL_SECONDS = 30 * 60  # класифайди — раз на 30 хв
 
 # Скільки Playwright-браузерів (сайтів) парсити одночасно, а не по черзі.
-# З 19 джерелами послідовний прохід ризикував не вкластись у
-# PARSE_INTERVAL_SECONDS; забагато одночасних Chromium — ризик вичерпати
-# RAM сервера. Підбирай під реальні ресурси сервера через .env, без правки коду.
+# Забагато одночасних Chromium — ризик вичерпати RAM сервера. Підбирай під
+# реальні ресурси сервера через .env, без правки коду.
 MAX_CONCURRENT_SITE_PARSERS = int(os.environ.get("MAX_CONCURRENT_SITE_PARSERS", "3"))
 
-# Скільки оголошень оцінювати Claude одночасно (а не по одному).
+# Скільки оголошень обробляти Claude одночасно (а не по одному).
 CLAUDE_CONCURRENCY = int(os.environ.get("CLAUDE_CONCURRENCY", "5"))
-
-# Тимчасово (за проханням користувача): усе нове йде в бот без відсіву —
-# Claude лише додає короткий аналіз/скоринг/безпеку до повідомлення, але
-# нічого не відкидає. Поставити назад True, щоб повернути п.3/п.7 ТЗ.
-ENABLE_HARD_FILTERS = False
-ENABLE_SCORE_THRESHOLD = False
+# Скільки раніше збережених без витягу оголошень дозаповнювати за один цикл.
+RETRY_EXTRACTION_PER_CYCLE = 100
 
 
 def _load_sites() -> list[dict]:
@@ -122,9 +120,8 @@ async def run_all_parsers() -> tuple[list[dict], list[dict]]:
     try:
         tg_listings = await telegram_channels.parse()
         # city вже виставлено в channels.py (кожен канал у channels.json має
-        # своє місто); тип нерухомості тут вільний текст, тегуємо евристикою
-        # (None -> підходить під будь-який вибір підписника, а не ховається
-        # через невизначеність).
+        # своє місто); тип нерухомості тут вільний текст — тегуємо евристикою,
+        # а якщо вона не впоралась (None), тип визначить Claude при витягу полів.
         for listing in tg_listings:
             listing["property_type"] = hard_filters.detect_property_type(listing)
         logger.info("telegram-канали: знайдено %d оголошень", len(tg_listings))
@@ -154,85 +151,92 @@ async def run_all_parsers() -> tuple[list[dict], list[dict]]:
     return all_listings, source_stats
 
 
-async def score_new_listings(listings: list[dict]) -> tuple[list[dict], dict]:
-    """Хард-фільтри (п.3) → довідник об'єктів безпеки (п.5) → скоринг Claude (п.9).
+def _normalize_prices(listing: dict[str, Any]) -> None:
+    """Гарантує обидві ціни (UAH і USD) за курсом НБУ — фільтр бюджету в ТЗ у
+    грн/міс, а частина джерел (Telegram, dom.ria) дає лише долари."""
+    uah, usd = listing.get("price_uah"), listing.get("price_usd")
+    if uah is None and usd is not None:
+        listing["price_uah"] = currency.usd_to_uah(usd)
+        listing["price_currency"] = "USD"
+    elif usd is None and uah is not None:
+        listing["price_usd"] = currency.uah_to_usd(uah)
 
-    Якщо Claude недоступний (немає ключа/збій API) — оголошення все одно йде
-    далі (з claude=None), щоб мовчазна відмова API не глушила весь пайплайн;
-    якщо ж Claude відповів, але score нижче порогу — це і є "в архів, у
-    Telegram не йде" з п.7 ТЗ.
 
-    Повертає (оголошення, що йдуть далі, статистика для логу/звіту адміну).
-    """
-    result = []
-    hard_passed = 0
-    sale_rejected = 0
-    claude_hard_rejected = 0
-    claude_unavailable = 0
-    below_threshold = 0
-
-    candidates: list[dict] = []
-    for listing in listings:
-        # Завжди, незалежно від ENABLE_HARD_FILTERS — замовника продаж не
-        # цікавить в принципі, це не той самий "тимчасово вимкнений" фільтр.
-        if hard_filters.is_sale_listing(listing):
-            sale_rejected += 1
-            continue
-        if ENABLE_HARD_FILTERS and not hard_filters.passes_hard_filters(listing):
-            continue
-        hard_passed += 1
-        candidates.append(listing)
-
-    # Виклик Claude займає ~10 с; послідовно сотні оголошень (особливо на
+async def _extract_many(listings: list[dict]) -> list[dict | None]:
+    # Виклик Claude займає секунди; послідовно сотні оголошень (особливо на
     # першому запуску) оброблялись би годинами. Паралелимо з обмеженням
     # (CLAUDE_CONCURRENCY), щоб не впертись у rate limit API.
     semaphore = asyncio.Semaphore(CLAUDE_CONCURRENCY)
 
-    async def _score(listing: dict) -> dict | None:
-        objects = security_reference.nearby_objects(listing.get("lat"), listing.get("lon"))
+    async def _one(listing: dict) -> dict | None:
         async with semaphore:
-            return await claude_scoring.score_listing(listing, objects)
+            return await claude_extract.extract(listing)
 
-    claude_results = await asyncio.gather(*(_score(listing) for listing in candidates))
+    return list(await asyncio.gather(*(_one(listing) for listing in listings)))
 
-    for listing, claude_result in zip(candidates, claude_results):
-        listing["claude"] = claude_result
 
-        if claude_result is None:
-            claude_unavailable += 1
-        elif claude_result.get("hard_reject"):
-            # Завжди, незалежно від ENABLE_SCORE_THRESHOLD — це не поріг
-            # скорингу, а явна відмова: Claude знайшов у тексті пряму заяву,
-            # що критичної вимоги (укриття тощо) немає взагалі.
-            claude_hard_rejected += 1
-            continue
-        elif ENABLE_SCORE_THRESHOLD:
-            score = claude_result.get("score")
-            if isinstance(score, (int, float)) and score < SCORE_THRESHOLD:
-                below_threshold += 1
-                continue
+async def ingest(listings: list[dict]) -> tuple[dict[str, int], list[int]]:
+    """Обробляє результат парсингу: оновлює відомі оголошення, нові проганяє
+    через відсів продажу, дедуплікацію і витяг полів та зберігає в базу.
 
-        result.append(listing)
-
+    Повертає (статистика, id щойно доданих оголошень)."""
     stats = {
-        "considered": len(listings),
-        "sale_rejected": sale_rejected,
-        "claude_hard_rejected": claude_hard_rejected,
-        "hard_passed": hard_passed,
-        "claude_scored": hard_passed - claude_unavailable,
-        "claude_unavailable": claude_unavailable,
-        "below_threshold": below_threshold,
+        "parsed": len(listings), "known": 0, "new": 0, "sale_rejected": 0, "duplicates": 0,
+        "extracted": 0, "extract_failed": 0, "not_rental": 0, "inserted": 0,
+        "price_drops": 0, "retried": 0,
     }
-    if sale_rejected:
-        pipeline_log.sale_filter_result(sale_rejected, len(listings))
-    pipeline_log.hard_filter_result(hard_passed, len(listings))
-    pipeline_log.claude_summary(
-        scored=stats["claude_scored"],
-        unavailable=claude_unavailable,
-        below_threshold=below_threshold,
-        hard_rejected=claude_hard_rejected,
-    )
-    return result, stats
+    for listing in listings:
+        _normalize_prices(listing)
+
+    known = rentdb.existing_external_ids([item["external_id"] for item in listings])
+    existing = [item for item in listings if item["external_id"] in known]
+    new_all = [item for item in listings if item["external_id"] not in known]
+    stats["known"], stats["new"] = len(existing), len(new_all)
+
+    touched = rentdb.touch_existing(existing)
+    stats["price_drops"] = touched["dropped"]
+
+    # Завжди: замовника цікавить лише оренда — продаж відсіюється ще до Claude.
+    sale = [item for item in new_all if hard_filters.is_sale_listing(item)]
+    if sale:
+        rentdb.reject_many([item["external_id"] for item in sale], "sale")
+    stats["sale_rejected"] = len(sale)
+    sale_ids = {item["external_id"] for item in sale}
+    candidates = [item for item in new_all if item["external_id"] not in sale_ids]
+
+    unique, stats["duplicates"] = dedup.filter_duplicates(candidates, rentdb.active_listings_for_dedup())
+    pipeline_log.duplicates_result(stats["duplicates"], len(candidates))
+
+    extracted = await _extract_many(unique)
+
+    new_ids: list[int] = []
+    for listing, ex in zip(unique, extracted):
+        if ex is None:
+            stats["extract_failed"] += 1
+        else:
+            stats["extracted"] += 1
+            if not ex["is_rental"]:
+                rentdb.reject(listing["external_id"], "not_rental")
+                stats["not_rental"] += 1
+                continue
+        if not listing.get("property_type") and not (ex and ex.get("property_type")):
+            listing["property_type"] = "apartment"  # тип не визначився ні евристикою, ні Claude
+        listing_id = rentdb.insert_listing(listing, ex)
+        if listing_id is not None:
+            new_ids.append(listing_id)
+    stats["inserted"] = len(new_ids)
+
+    # Оголошення, збережені без витягу (Claude був недоступний), — дозаповнюємо.
+    pending = rentdb.listings_needing_extraction(RETRY_EXTRACTION_PER_CYCLE)
+    if pending:
+        retried = await _extract_many(pending)
+        for row, ex in zip(pending, retried):
+            if ex is not None:
+                rentdb.apply_extraction(row["id"], ex)
+                stats["retried"] += 1
+
+    pipeline_log.ingest_summary(stats)
+    return stats, new_ids
 
 
 async def _notify_admin(bot: Bot, chat_id: int, text: str) -> None:
@@ -242,47 +246,40 @@ async def _notify_admin(bot: Bot, chat_id: int, text: str) -> None:
         logger.exception("Не вдалося надіслати звіт адміну (chat_id=%s)", chat_id)
 
 
-def _build_admin_report(
-    source_stats: list[dict],
-    new_counts: dict[str, int],
-    total_new: int,
-    duplicate_count: int,
-    score_stats: dict,
-    sent: int,
-) -> str:
+def _build_admin_report(source_stats: list[dict], stats: dict[str, int], notified: int) -> str:
     errors = [s for s in source_stats if s["error"]]
     lines = ["🔴 Були помилки в циклі!" if errors else "📊 Цикл парсингу завершено"]
-
     for s in source_stats:
         if s["error"]:
             lines.append(f"⚠️ {s['name']}: ПОМИЛКА — {s['error']}")
         else:
             lines.append(f"{s['name']}: знайдено {s['found']}")
 
-    if total_new:
-        parts = ", ".join(f"{src}={n}" for src, n in new_counts.items())
-        lines.append(f"\n🆕 Нових: {total_new} ({parts})")
-        if duplicate_count:
-            lines.append(f"🔁 Дублікатів (те саме джерело/об'єкт іншим сайтом): {duplicate_count}")
-    else:
-        lines.append("\n🆕 Нових оголошень немає")
-
-    if score_stats.get("sale_rejected"):
-        lines.append(f"🚫 Продаж (не оренда): {score_stats['sale_rejected']} відсіяно")
-
+    db_stats = rentdb.stats()
     lines.append(
-        f"✅ Хард-фільтр: {score_stats['hard_passed']} із {score_stats['considered']} пройшли\n"
-        f"🤖 Claude: оцінено {score_stats['claude_scored']}, "
-        f"недоступно {score_stats['claude_unavailable']}, "
-        f"явно відхилено (hard_reject) {score_stats.get('claude_hard_rejected', 0)}, "
-        f"нижче порогу {score_stats['below_threshold']}\n"
-        f"📤 Надіслано підписникам: {sent}"
+        f"\n🆕 Нових: {stats['new']} (відомих: {stats['known']})\n"
+        f"🚫 Продаж/не оренда: {stats['sale_rejected'] + stats['not_rental']}\n"
+        f"🔁 Дублікатів: {stats['duplicates']}\n"
+        f"🤖 Витяг полів Claude: {stats['extracted']}, недоступно: {stats['extract_failed']}, "
+        f"дозаповнено раніше збережених: {stats['retried']}\n"
+        f"💾 Додано в базу: {stats['inserted']}, знижено ціну: {stats['price_drops']}\n"
+        f"🔔 Надіслано сповіщень: {notified}\n"
+        f"📚 Усього в базі: {db_stats['total']}"
     )
     return "\n".join(lines)
 
 
+def _delete_local_files(paths: list[str]) -> None:
+    for path in paths:
+        try:
+            Path(path).unlink(missing_ok=True)
+        except OSError:
+            logger.warning("Не вдалося видалити файл %s", path)
+
+
 async def parser_loop(bot: Bot) -> None:
-    """Фоновий цикл: раз на PARSE_INTERVAL_SECONDS парсить джерела і шле нові оголошення."""
+    """Фоновий цикл: раз на PARSE_INTERVAL_SECONDS парсить джерела, поповнює
+    базу і сповіщає підписників зі збереженими фільтрами про нові об'єкти."""
     admin_chat_id_raw = os.environ.get("ADMIN_CHAT_ID")
     admin_chat_id = int(admin_chat_id_raw) if admin_chat_id_raw else None
     if not admin_chat_id:
@@ -291,74 +288,31 @@ async def parser_loop(bot: Bot) -> None:
     while True:
         try:
             pipeline_log.cycle_start()
-            is_bootstrap_cycle = not storage.is_bootstrapped()
+            is_bootstrap_cycle = not rentdb.is_bootstrapped()
             if is_bootstrap_cycle:
                 logger.info(
-                    "Перший запуск: формуємо базову лінію (усе поточне позначаємо "
-                    "як 'вже бачене', без розсилки підписникам)"
+                    "Перший запуск: формуємо базову лінію (усе поточне зберігаємо в базу, "
+                    "але сповіщень про це не шлемо)"
                 )
 
             listings, source_stats = await run_all_parsers()
-            new_listings_all = [item for item in listings if not storage.is_seen(item["external_id"])]
+            stats, new_ids = await ingest(listings)
 
-            new_counts: dict[str, int] = {}
-            for item in new_listings_all:
-                new_counts[item["source"]] = new_counts.get(item["source"], 0) + 1
-            pipeline_log.new_by_source(new_counts, len(new_listings_all))
-
-            # Дедуплікація (п.7/п.8 ТЗ) — той самий будинок, викладений кількома
-            # джерелами чи репостом, не повинен йти окремим повідомленням кожен
-            # раз. Відсіяні дублікати все одно позначаються "вже баченими" нижче
-            # (за new_listings_all), щоб не перевірялись на дедуп щоцикл заново.
-            new_listings, duplicate_count = dedup.filter_duplicates(new_listings_all)
-            pipeline_log.duplicates_result(duplicate_count, len(new_listings_all))
-
-            if new_listings:
-                logger.info("Нових оголошень цього циклу (після дедуплікації): %d", len(new_listings))
-
-            to_send, score_stats = await score_new_listings(new_listings)
-            if to_send:
-                logger.info("Пройшли хард-фільтри і поріг скорингу: %d", len(to_send))
-                storage.add_matched(to_send)
-
-            # На першому запуску (bootstrap) навмисно НЕ розсилаємо — інакше кожен,
-            # хто вже написав /start, отримав би "потоп" з усього, що на цей момент
-            # просто вже існує на ринку. Далі, з наступного циклу, розсилка йде як
-            # звичайно — тільки те, що справді щойно з'явилось.
-            #
-            # Фото (включно з локальними з Telegram-джерел) навмисно НЕ видаляються
-            # після відправки — вони лишаються на диску, щоб /start новим підписникам
-            # міг показати ці ж оголошення з фото пізніше. Видаляються лише коли
-            # оголошення випадає зі storage.matched_listings.json за лімітом.
-            if not is_bootstrap_cycle:
-                for listing in to_send:
-                    # Один токен на оголошення (не на чат) — щоб адмін міг
-                    # видалити його одразу в усіх чатах підписників одним
-                    # натисканням кнопки (telegam/bot.py: cb_delete_everywhere).
-                    delete_token = secrets.token_hex(8)
-                    for chat_id in storage.active_subscriber_ids():
-                        prefs = storage.get_preferences(chat_id)
-                        if not hard_filters.matches_subscriber_preferences(
-                            listing, prefs["cities"], prefs["property_types"]
-                        ):
-                            continue
-                        await send_listing(bot, chat_id, listing, delete_token=delete_token)
-                        await asyncio.sleep(1.2)  # уникнути flood control Telegram при пачці оголошень
-
-            storage.mark_seen_bulk([item["external_id"] for item in new_listings_all])
+            notified = 0
             if is_bootstrap_cycle:
-                storage.mark_bootstrapped()
-            pipeline_log.cycle_result(sent=0 if is_bootstrap_cycle else len(to_send))
+                rentdb.mark_bootstrapped()
+            elif new_ids:
+                notified = await notify.notify_new_listings(bot, new_ids)
+
+            _delete_local_files(rentdb.prune_old())
+            pipeline_log.cycle_result(sent=notified)
 
             if admin_chat_id:
-                sent_count = 0 if is_bootstrap_cycle else len(to_send)
-                report = _build_admin_report(
-                    source_stats, new_counts, len(new_listings_all), duplicate_count, score_stats, sent_count
-                )
+                report = _build_admin_report(source_stats, stats, notified)
                 if is_bootstrap_cycle:
                     report = (
-                        f"🚀 Перший запуск — сформована базова лінія ({len(to_send)} оголошень "
-                        "збережено, розсилку підписникам пропущено)\n\n" + report
+                        f"🚀 Перший запуск — базова лінія сформована ({stats['inserted']} оголошень "
+                        "збережено, сповіщення про них не надсилались)\n\n" + report
                     )
                 await _notify_admin(bot, admin_chat_id, report)
         except Exception as exc:
@@ -378,9 +332,15 @@ async def main() -> None:
     if not token:
         raise RuntimeError("Не задано TELEGRAM_BOT_TOKEN — перевір файл project/.env")
 
+    rentdb.connect()
+    migrated = rentdb.migrate_legacy_subscribers()
+    if migrated:
+        logger.info("Перенесено %d підписників зі старого subscribers.json у нову базу", migrated)
+
     bot = Bot(token=token)
     dp = Dispatcher()
     dp.include_router(router)
+    await setup_commands(bot)
 
     asyncio.create_task(parser_loop(bot))
 

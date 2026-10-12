@@ -63,23 +63,21 @@ def duplicates_result(duplicates: int, total: int) -> None:
     _logger.info("%-14s | %d із %d відсіяно як дублікат іншого джерела", "дедуп", duplicates, total)
 
 
-def sale_filter_result(rejected: int, total: int) -> None:
-    _logger.info("%-14s | %d із %d відсіяно як ПРОДАЖ (не оренда)", "продаж", rejected, total)
-
-
-def hard_filter_result(passed: int, total: int) -> None:
-    _logger.info("%-14s | %d із %d пройшли", "хард-фільтр", passed, total)
-
-
-def claude_summary(scored: int, unavailable: int, below_threshold: int, hard_rejected: int = 0) -> None:
+def ingest_summary(stats: dict) -> None:
     _logger.info(
-        "%-14s | оцінено=%d недоступно=%d нижче_порогу=%d hard_reject=%d",
-        "claude", scored, unavailable, below_threshold, hard_rejected,
+        "%-14s | розпарсено=%d відомих=%d нових=%d продаж=%d не_оренда=%d дублікатів=%d",
+        "обробка", stats["parsed"], stats["known"], stats["new"],
+        stats["sale_rejected"], stats["not_rental"], stats["duplicates"],
+    )
+    _logger.info(
+        "%-14s | витягнуто=%d недоступно=%d дозаповнено=%d додано_в_базу=%d знижено_ціну=%d",
+        "claude/база", stats["extracted"], stats["extract_failed"], stats["retried"],
+        stats["inserted"], stats["price_drops"],
     )
 
 
 def cycle_result(sent: int) -> None:
-    _logger.info("%-14s | надіслано=%d", "результат", sent)
+    _logger.info("%-14s | сповіщень=%d", "результат", sent)
     _logger.info("==================== ЦИКЛ ЗАВЕРШЕНО ====================")
 
 

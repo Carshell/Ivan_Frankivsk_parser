@@ -27,3 +27,4 @@ web_pages/orenda_if_ua_output.json
 currency_cache.json
 security_objects.json
 logs/
+data/

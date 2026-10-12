@@ -56,7 +56,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "districts_bank": "За берегом Дніпра:",
         "bank_right": "Правий берег",
         "bank_left": "Лівий берег",
-        "step_budget": "Бюджет, грн/міс:",
+        "step_budget": "Бюджет, грн/міс (можна обрати кілька):",
         "step_extras": "Додаткові фільтри (цей крок можна пропустити):",
         "step_summary": "Ваші фільтри:",
         "btn_show": "▶️ Показати",
@@ -223,7 +223,7 @@ STRINGS: dict[str, dict[str, str]] = {
         "districts_bank": "By the Dnipro bank:",
         "bank_right": "Right bank",
         "bank_left": "Left bank",
-        "step_budget": "Budget, UAH/month:",
+        "step_budget": "Budget, UAH/month (you can pick several):",
         "step_extras": "Additional filters (you can skip this step):",
         "step_summary": "Your filters:",
         "btn_show": "▶️ Show",
@@ -361,6 +361,36 @@ def budget_label(lang: str, index: int) -> str:
     if hi is None:
         return t(lang, "budget_from", n=lo // 1000)
     return t(lang, "budget_range", a=lo // 1000, b=hi // 1000)
+
+
+def budget_indices(value) -> list[int]:
+    """Обраний бюджет як відсортований список індексів діапазонів. Приймає і
+    старий формат (одне число) зі збережених фільтрів."""
+    if value is None or value == "":
+        return []
+    items = value if isinstance(value, (list, tuple, set)) else [value]
+    return sorted({int(i) for i in items if 0 <= int(i) < len(BUDGET_RANGES)})
+
+
+def budget_labels(lang: str, value) -> str:
+    """Підпис бюджету; сусідні діапазони зливаються: 15–20 + 20–25 → 15–25 тис."""
+    indices = budget_indices(value)
+    groups: list[list[int]] = []
+    for index in indices:
+        if groups and index == groups[-1][-1] + 1:
+            groups[-1].append(index)
+        else:
+            groups.append([index])
+    labels = []
+    for group in groups:
+        lo, hi = BUDGET_RANGES[group[0]][0], BUDGET_RANGES[group[-1]][1]
+        if lo == 0 and hi is not None:
+            labels.append(t(lang, "budget_up_to", n=hi // 1000))
+        elif hi is None:
+            labels.append(t(lang, "budget_from", n=lo // 1000))
+        else:
+            labels.append(t(lang, "budget_range", a=lo // 1000, b=hi // 1000))
+    return ", ".join(labels)
 
 
 def area_label(lang: str, index: int) -> str:

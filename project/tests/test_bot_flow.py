@@ -35,6 +35,7 @@ def seed():
        "balcony": True, "metro": "Осокорки 10 хв", "utilities_included": True})
     L(listing("k3", price_uah=24000.0, rooms=3, area=85.0, floor=9, floor_total=9), {"district": "kyiv.obolon"})
     L(listing("k4", price_uah=30000.0, rooms=1, area=33.0, floor=1, photos=[]), {"district": "kyiv.center"})
+    L(listing("b27", price_uah=27000.0), {"district": "kyiv.pozniaky", "pets": True})
     for i in range(9):
         L(listing(f"f{i}", price_uah=20500.0 + i * 300, area=50.0 + i), {"district": "kyiv.pechersk", "pets": True})
     L(listing("h1", city="ivano-frankivsk", property_type="house", price_uah=52000.0, rooms=4, area=140.0, floor=None, floor_total=2),
@@ -129,6 +130,12 @@ async def main():
     for expected in ("до 15 тис.", "15–20 тис.", "20–25 тис.", "25–30 тис.", "30–35 тис.", "35–45 тис.", "45–60 тис.", "60 тис. та більше"):
         assert expected in budget_labels, expected
     await h.press(C, "20–25 тис.")
+    await h.press(C, "25–30 тис.")
+    await h.press(C, "15–20 тис.")
+    await h.press(C, "15–20 тис.")  # повторне натискання знімає вибір
+    assert [b for b in button_texts(h.latest_with_markup(C)[1]["markup"]) if "✅" in b] == ["✅ 20–25 тис.", "✅ 25–30 тис."]
+    assert rentdb.get_state(C)["draft"]["budget"] == [2, 3]
+    await h.press(C, "Далі")
 
     # ------------------------------------------------ додаткові фільтри --------
     assert "Додаткові фільтри" in h.last_text(C)
@@ -149,7 +156,7 @@ async def main():
     draft = rentdb.get_state(C)["draft"]
     expected, total = rentdb.search(
         {"type": "apartment", "city": "kyiv", "rooms": [2, 3], "districts": ["kyiv.pechersk", "kyiv.pozniaky"],
-         "budget": 2, "pets": "yes"}, sort="date", offset=0, limit=5)
+         "budget": [2, 3], "pets": "yes"}, sort="date", offset=0, limit=5)
     assert total > 5, f"потрібна пагінація, а знайдено {total}"
     sent = card_ids(h.since(mark))
     assert sent == [r["id"] for r in expected], (sent, [r["id"] for r in expected])
@@ -174,7 +181,7 @@ async def main():
     await h.press(C, "Показати ще")
     expected2, _ = rentdb.search(
         {"type": "apartment", "city": "kyiv", "rooms": [2, 3], "districts": ["kyiv.pechersk", "kyiv.pozniaky"],
-         "budget": 2, "pets": "yes"}, sort="date", offset=5, limit=5)
+         "budget": [2, 3], "pets": "yes"}, sort="date", offset=5, limit=5)
     page2 = card_ids(h.since(mark))
     assert page2 == [r["id"] for r in expected2] and not set(page2) & set(sent)
 
@@ -211,7 +218,7 @@ async def main():
     await h.press(C, "Зберегти фільтр")
     assert h.alerts[-1][0].startswith("Фільтр збережено") and h.alerts[-1][1] is True
     saved = rentdb.sf_list(C)
-    assert len(saved) == 1 and saved[0]["name"] == "Квартира · Київ · 2/3к · 20–25 тис." and saved[0]["notify"]
+    assert len(saved) == 1 and saved[0]["name"] == "Квартира · Київ · 2/3к · 20–30 тис." and saved[0]["notify"]
     mark = h.mark()
     await h.say(C, "/filters")
     assert any("Збережені фільтри" in (p.get("text") or "") for n, p in h.since(mark))
@@ -228,7 +235,7 @@ async def main():
     sent_count = await notify.notify_new_listings(h.bot, [new_id, miss_id])
     assert sent_count == 1
     note = [p.get("text") or p.get("caption") or "" for n, p in h.since(mark) if n in ("SendMessage", "SendPhoto")]
-    assert any("🔔 Новий об'єкт за фільтром «Квартира · Київ · 2/3к · 20–25 тис.»" in t and f"🆔 ID: {new_id}" in t for t in note)
+    assert any("🔔 Новий об'єкт за фільтром «Квартира · Київ · 2/3к · 20–30 тис.»" in t and f"🆔 ID: {new_id}" in t for t in note)
     assert not any(f"🆔 ID: {miss_id}" in t for t in note)
     assert "🆕 Новий" in note[0], "мітка Новий після базової лінії"
 
@@ -255,6 +262,7 @@ async def main():
     await h.press(C2, "Обрати все")
     await h.press(C2, "Далі")
     await h.press(C2, "60 тис. та більше")
+    await h.press(C2, "Далі")
     await h.press(C2, "Пропустити")
     assert "Нічого не знайшов" in h.last_text(C2)
     assert {"📍 Усі райони", "💰 Змінити бюджет", "⚙️ Змінити фільтри"} <= set(button_texts(h.latest_with_markup(C2)[1]["markup"]))

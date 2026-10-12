@@ -68,6 +68,12 @@ def main():
     assert ids(rows) == {"a", "c"}
     rows, _ = rentdb.search({**base, "budget": 7})  # 60+
     assert ids(rows) == {"c"}
+    rows, _ = rentdb.search({**base, "budget": [2]})
+    assert ids(rows) == {"a", "c"}
+    rows, _ = rentdb.search({**base, "budget": [2, 7]})
+    assert ids(rows) >= {"a", "c"}
+    rows, _ = rentdb.search({**base, "budget": list(range(8))})
+    assert ids(rows) == {"a", "b", "c"}, "усі діапазони = без обмеження (з урахуванням відомої ціни)"
     rows, _ = rentdb.search({**base, "pets": "no"})
     assert ids(rows) == {"b", "c"}, "pets=no: a явно дозволяє тварин -> відсіюється"
     rows, _ = rentdb.search({**base, "pets": "yes", "furn": "yes", "from": "owner"})

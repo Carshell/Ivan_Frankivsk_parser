@@ -28,7 +28,7 @@ from aiogram.types import (
 
 import districts as dist
 import rentdb
-from i18n import AREA_RANGES, BUDGET_RANGES, LANGS, area_label, budget_label, t
+from i18n import AREA_RANGES, BUDGET_RANGES, LANGS, area_label, budget_indices, budget_label, budget_labels, t
 from telegam.cards import call_with_flood_retry, card_keyboard, compare_text, send_cards
 
 logger = logging.getLogger(__name__)
@@ -59,7 +59,7 @@ FILTER_KEYS = ("type", "city", "rooms", "districts", "budget", "pets", "kids", "
 
 # ----------------------------------------------------------------- чернетка ----
 def new_draft() -> dict[str, Any]:
-    return {"type": None, "city": None, "rooms": [], "districts": [], "budget": None,
+    return {"type": None, "city": None, "rooms": [], "districts": [], "budget": [],
             "pets": None, "kids": None, "floor": None, "area": None, "furn": None, "from": None, "edit": False}
 
 
@@ -103,8 +103,8 @@ def summary_text(lang: str, draft: dict[str, Any]) -> str:
     rooms = draft.get("rooms") or []
     rooms_txt = ", ".join(("4+" if r >= 4 else str(r)) for r in sorted(rooms)) or t(lang, "not_set")
     type_txt = t(lang, f"type_{draft['type']}") if draft.get("type") else t(lang, "not_set")
-    budget = draft.get("budget")
-    budget_txt = f"{budget_label(lang, budget)} {t(lang, 'unit_uah')}" if budget is not None else t(lang, "not_set")
+    budget = budget_indices(draft.get("budget"))
+    budget_txt = f"{budget_labels(lang, budget)} {t(lang, 'unit_uah')}" if budget else t(lang, "not_set")
 
     extras: list[str] = []
     for key, _options in extras_visible(draft):
@@ -133,8 +133,8 @@ def filter_name(lang: str, filters: dict[str, Any]) -> str:
     rooms = filters.get("rooms") or []
     if rooms:
         parts.append("/".join(("4+" if r >= 4 else str(r)) for r in sorted(rooms)) + t(lang, "rooms_short", n="").strip())
-    if filters.get("budget") is not None:
-        parts.append(budget_label(lang, int(filters["budget"])))
+    if budget_indices(filters.get("budget")):
+        parts.append(budget_labels(lang, filters["budget"]))
     return " · ".join(parts) or "—"
 
 
@@ -201,15 +201,16 @@ def kb_districts(lang: str, city: str, selected: list[str]) -> InlineKeyboardMar
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def kb_budget(lang: str, current: int | None) -> InlineKeyboardMarkup:
+def kb_budget(lang: str, current: list[int]) -> InlineKeyboardMarkup:
     rows, pair = [], []
     for index in range(len(BUDGET_RANGES)):
-        pair.append(btn(mark(current == index, budget_label(lang, index)), f"bud:{index}"))
+        pair.append(btn(mark(index in current, budget_label(lang, index)), f"bud:{index}"))
         if len(pair) == 2:
             rows.append(pair)
             pair = []
     if pair:
         rows.append(pair)
+    rows.append([btn(t(lang, "btn_next"), "bud:next")])
     rows.append(nav_row(lang))
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -298,7 +299,7 @@ def step_view(state: dict[str, Any], step: str) -> tuple[str, InlineKeyboardMark
         city = draft.get("city") or "kyiv"
         return t(lang, "step_districts", city=dist.city_label(city, lang)), kb_districts(lang, city, draft.get("districts") or [])
     if step == "budget":
-        return t(lang, "step_budget"), kb_budget(lang, draft.get("budget"))
+        return t(lang, "step_budget"), kb_budget(lang, budget_indices(draft.get("budget")))
     if step == "extras":
         return t(lang, "step_extras"), kb_extras(lang, draft)
     if step.startswith("extras:"):
@@ -605,11 +606,19 @@ async def cb_budget(callback: CallbackQuery) -> None:
     state = rentdb.ensure_user(chat_id)
     lang = lang_of(state)
     value = (callback.data or "").split(":", 1)[1]
-    if state["step"] != "budget" or not value.isdigit() or int(value) >= len(BUDGET_RANGES):
+    if state["step"] != "budget":
         return await _stale(callback, lang)
+    draft = state["draft"]
     await callback.answer()
-    state["draft"]["budget"] = int(value)
-    await goto(callback.bot, chat_id, state, next_step(state, "budget"), callback_message(callback))
+    if value == "next":  # жоден діапазон не обрано — бюджет не обмежується
+        await goto(callback.bot, chat_id, state, next_step(state, "budget"), callback_message(callback))
+        return
+    if not value.isdigit() or int(value) >= len(BUDGET_RANGES):
+        return await _stale(callback, lang)
+    chosen = set(budget_indices(draft.get("budget")))
+    chosen.symmetric_difference_update({int(value)})
+    draft["budget"] = sorted(chosen)
+    await goto(callback.bot, chat_id, state, "budget", callback_message(callback))
 
 
 @router.callback_query(F.data.startswith("x:"))

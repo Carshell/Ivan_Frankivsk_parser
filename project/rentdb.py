@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import districts as dist
-from i18n import AREA_RANGES, BUDGET_RANGES
+from i18n import AREA_RANGES, BUDGET_RANGES, budget_indices
 
 logger = logging.getLogger(__name__)
 
@@ -495,15 +495,18 @@ def _build_where(filters: dict[str, Any], now: float) -> tuple[list[str], list[A
             conds.append(f"(district IS NULL OR district IN ({','.join('?' * len(selected))}))")
             params.extend(selected)
 
-    budget = filters.get("budget")
-    if budget is not None:
-        lo, hi = BUDGET_RANGES[int(budget)]
-        if hi is None:
-            conds.append("(price_uah IS NULL OR price_uah >= ?)")
-            params.append(lo)
-        else:
-            conds.append("(price_uah IS NULL OR (price_uah >= ? AND price_uah < ?))")
-            params.extend([lo, hi])
+    budget = budget_indices(filters.get("budget"))
+    if budget:
+        ranges: list[str] = []
+        for index in budget:
+            lo, hi = BUDGET_RANGES[index]
+            if hi is None:
+                ranges.append("price_uah >= ?")
+                params.append(lo)
+            else:
+                ranges.append("(price_uah >= ? AND price_uah < ?)")
+                params.extend([lo, hi])
+        conds.append("(price_uah IS NULL OR " + " OR ".join(ranges) + ")")
 
     for key, column in (("pets", "pets"), ("kids", "kids"), ("furn", "furnished")):
         value = filters.get(key)

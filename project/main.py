@@ -34,6 +34,7 @@ import currency
 import dedup
 import hard_filters
 import pipeline_log
+from photos import hires_all
 import rentdb
 from instagram import parser as instagram_parser
 from telegam import channels as telegram_channels
@@ -187,6 +188,7 @@ async def ingest(listings: list[dict]) -> tuple[dict[str, int], list[int]]:
     }
     for listing in listings:
         _normalize_prices(listing)
+        listing["photos"] = hires_all(listing.get("photos"))
 
     known = rentdb.existing_external_ids([item["external_id"] for item in listings])
     existing = [item for item in listings if item["external_id"] in known]

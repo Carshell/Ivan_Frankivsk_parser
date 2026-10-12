@@ -201,7 +201,7 @@ async def _extract_detail(page: Page, url: str) -> dict[str, Any] | None:
             address=city or None,
             lat=None,  # OLX не публікує точні координати/адресу
             lon=None,
-            photos=(product.get("image") or [])[:5],
+            photos=(product.get("image") or [])[:10],
             contact=None,  # телефон прихований за кнопкою "показати" — потребує окремого кліку
             features=features,
             raw_snapshot={"product": product, "characteristics": chars},

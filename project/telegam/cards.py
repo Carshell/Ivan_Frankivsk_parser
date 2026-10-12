@@ -15,6 +15,7 @@ from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarku
 import districts as dist
 import rentdb
 from i18n import t
+from photos import hires_all
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +180,7 @@ async def send_card(
     if header:
         text = f"{header}\n\n{text}"
     keyboard = card_keyboard(lang, listing, is_fav, with_more_offset, more_prefix)
-    photos = (listing.get("photos") or [])[:MAX_PHOTOS_PER_ALBUM]
+    photos = hires_all(listing.get("photos"))[:MAX_PHOTOS_PER_ALBUM]
 
     async def send_text() -> None:
         await call_with_flood_retry(

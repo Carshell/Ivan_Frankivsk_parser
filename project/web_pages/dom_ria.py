@@ -78,7 +78,7 @@ def _with_page_param(url: str, page_num: int) -> str:
 
 def _photo_url(file_path: str) -> str:
     stem = re.sub(r"\.\w+$", "", file_path)
-    return f"{PHOTO_CDN}/{stem}xl.webp"
+    return f"{PHOTO_CDN}/{stem}xl.jpg"  # jpg важчий і чіткіший за стиснутий webp
 
 
 def _parse_price_arr(data: dict[str, Any], key: str) -> float | None:
